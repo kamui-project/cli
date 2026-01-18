@@ -142,3 +142,150 @@ func (e *APIError) IsNotFound() bool {
 	return e.StatusCode == http.StatusNotFound
 }
 
+// Installation represents a GitHub App installation with repositories
+type Installation struct {
+	ID        int64  `json:"id"`
+	Repository string `json:"repository"`
+	Owner     string `json:"owner"`
+	OwnerType string `json:"owner_type"`
+}
+
+// InstallationsResponse represents the response from /api/installations
+type InstallationsResponse struct {
+	Installations []Installation `json:"installations"`
+}
+
+// Branch represents a GitHub branch
+type Branch struct {
+	Name      string `json:"name"`
+	Protected bool   `json:"protected"`
+}
+
+// BranchListResponse represents the response from branches endpoint
+type BranchListResponse struct {
+	Branches []Branch `json:"branches"`
+}
+
+// CreateAppRequest represents the request body for creating an app
+type CreateAppRequest struct {
+	ProjectID           string            `json:"project_id"`
+	AppName             string            `json:"app_name"`
+	AppDisplayName      string            `json:"app_display_name,omitempty"`
+	Replicas            int               `json:"replicas"`
+	EnvVars             map[string]string `json:"env_vars"`
+	PreCommand          string            `json:"pre_command"`
+	StartCommand        string            `json:"start_command"`
+	SetupCommand        string            `json:"setup_command"`
+	HealthCheckEndpoint string            `json:"health_check_endpoint,omitempty"`
+	DeployType          string            `json:"deploy_type"`
+	AppType             string            `json:"app_type"`
+	LanguageType        string            `json:"language_type"`
+	OrganizationName    string            `json:"organization_name,omitempty"`
+	OwnerType           string            `json:"owner_type,omitempty"`
+	RepositoryName      string            `json:"repository_name,omitempty"`
+	RepositoryBranch    string            `json:"repository_branch,omitempty"`
+	Directory           string            `json:"directory,omitempty"`
+	DatabaseID          string            `json:"database_id,omitempty"`
+	AppSpecType         string            `json:"app_spec_type,omitempty"`
+	Status              *ProjectStatus    `json:"status"`
+}
+
+// ProjectStatus represents the status of a project/app
+type ProjectStatus struct {
+	StatusRunning int `json:"status_running"`
+	StatusStopped int `json:"status_stopped"`
+	StatusError   int `json:"status_error"`
+	StatusUnknown int `json:"status_unknown"`
+}
+
+// AppCreateResponse represents the response from creating an app
+type AppCreateResponse struct {
+	Message string `json:"message"`
+	AppID   string `json:"app_id"`
+}
+
+// GetInstallations fetches all GitHub App installations for the user
+func (c *Client) GetInstallations(ctx context.Context) ([]Installation, error) {
+	var resp InstallationsResponse
+	if err := c.Get(ctx, "/api/installations", &resp); err != nil {
+		return nil, err
+	}
+	return resp.Installations, nil
+}
+
+// GetBranches fetches branches for a repository
+func (c *Client) GetBranches(ctx context.Context, owner, repo string) ([]Branch, error) {
+	path := fmt.Sprintf("/api/repositories/%s/%s/branches", owner, repo)
+	var resp BranchListResponse
+	if err := c.Get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Branches, nil
+}
+
+// CreateApp creates a new application
+func (c *Client) CreateApp(ctx context.Context, req *CreateAppRequest) (*AppCreateResponse, error) {
+	var resp AppCreateResponse
+	if err := c.Post(ctx, "/api/apps", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateProjectRequest represents the request body for creating a project
+type CreateProjectRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	PlanType    string `json:"plan_type"`
+	Region      string `json:"region"`
+}
+
+// BasicSuccessResponse represents a simple success response from the API
+type BasicSuccessResponse struct {
+	Message string `json:"message"`
+}
+
+// CreateProject creates a new project
+func (c *Client) CreateProject(ctx context.Context, req *CreateProjectRequest) error {
+	var resp BasicSuccessResponse
+	if err := c.Post(ctx, "/api/projects", req, &resp); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DeleteProject deletes a project by ID
+func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
+	path := fmt.Sprintf("/api/projects/%s", projectID)
+	return c.Delete(ctx, path, nil)
+}
+
+// DeleteApp deletes an app by ID
+func (c *Client) DeleteApp(ctx context.Context, appID string) error {
+	path := fmt.Sprintf("/api/apps/%s", appID)
+	return c.Delete(ctx, path, nil)
+}
+
+// AppDetailResponse represents the response from GET /api/apps/{id}
+type AppDetailResponse struct {
+	DisplayName   string         `json:"display_name"`
+	PodStatus     *ProjectStatus `json:"pod_status"`
+	LanguageType  string         `json:"language_type"`
+	AppSpec       string         `json:"app_spec"`
+	AppType       string         `json:"app_type"`
+	GithubOrgRepo string         `json:"github_org_repo,omitempty"`
+	GithubBranch  string         `json:"github_branch,omitempty"`
+	URL           string         `json:"url"`
+	CustomDomain  string         `json:"custom_domain,omitempty"`
+}
+
+// GetApp fetches app details by ID
+func (c *Client) GetApp(ctx context.Context, appID string) (*AppDetailResponse, error) {
+	path := fmt.Sprintf("/api/apps/%s", appID)
+	var resp AppDetailResponse
+	if err := c.Get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+

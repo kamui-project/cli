@@ -24,6 +24,7 @@ type RootCommand struct {
 	loginCmd    *LoginCommand
 	logoutCmd   *LogoutCommand
 	projectsCmd *ProjectsCommand
+	appsCmd     *AppsCommand
 }
 
 // NewRootCommand creates a new root command
@@ -54,11 +55,13 @@ To get started, run:
 	r.loginCmd = NewLoginCommand(r)
 	r.logoutCmd = NewLogoutCommand(r)
 	r.projectsCmd = NewProjectsCommand(r)
+	r.appsCmd = NewAppsCommand(r)
 
 	// Add subcommands
 	r.cmd.AddCommand(r.loginCmd.Command())
 	r.cmd.AddCommand(r.logoutCmd.Command())
 	r.cmd.AddCommand(r.projectsCmd.Command())
+	r.cmd.AddCommand(r.appsCmd.Command())
 
 	return r
 }

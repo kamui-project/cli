@@ -58,8 +58,10 @@ func (m *MockAuthService) EnsureAuthenticated(ctx context.Context) error {
 
 // MockProjectService is a mock implementation of iface.ProjectService
 type MockProjectService struct {
-	ListProjectsFunc func(ctx context.Context) ([]iface.Project, error)
-	GetProjectFunc   func(ctx context.Context, id string) (*iface.Project, error)
+	ListProjectsFunc   func(ctx context.Context) ([]iface.Project, error)
+	GetProjectFunc     func(ctx context.Context, id string) (*iface.Project, error)
+	CreateProjectFunc  func(ctx context.Context, input *iface.CreateProjectInput) error
+	DeleteProjectFunc  func(ctx context.Context, id string) error
 }
 
 func (m *MockProjectService) ListProjects(ctx context.Context) ([]iface.Project, error) {
@@ -74,6 +76,20 @@ func (m *MockProjectService) GetProject(ctx context.Context, id string) (*iface.
 		return m.GetProjectFunc(ctx, id)
 	}
 	return nil, nil
+}
+
+func (m *MockProjectService) CreateProject(ctx context.Context, input *iface.CreateProjectInput) error {
+	if m.CreateProjectFunc != nil {
+		return m.CreateProjectFunc(ctx, input)
+	}
+	return nil
+}
+
+func (m *MockProjectService) DeleteProject(ctx context.Context, id string) error {
+	if m.DeleteProjectFunc != nil {
+		return m.DeleteProjectFunc(ctx, id)
+	}
+	return nil
 }
 
 func TestProjectsListCommand_Run(t *testing.T) {

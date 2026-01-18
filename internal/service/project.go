@@ -114,3 +114,38 @@ func (s *projectService) GetProject(ctx context.Context, id string) (*iface.Proj
 
 	return &project, nil
 }
+
+// CreateProject creates a new project
+func (s *projectService) CreateProject(ctx context.Context, input *iface.CreateProjectInput) error {
+	client, err := s.getAPIClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	req := &api.CreateProjectRequest{
+		Name:        input.Name,
+		Description: input.Description,
+		PlanType:    input.PlanType,
+		Region:      input.Region,
+	}
+
+	if err := client.CreateProject(ctx, req); err != nil {
+		return fmt.Errorf("failed to create project: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteProject deletes a project by ID
+func (s *projectService) DeleteProject(ctx context.Context, id string) error {
+	client, err := s.getAPIClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := client.DeleteProject(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete project: %w", err)
+	}
+
+	return nil
+}

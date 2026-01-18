@@ -14,6 +14,7 @@ type Container struct {
 	configManager  *config.Manager
 	authService    iface.AuthService
 	projectService iface.ProjectService
+	appService     iface.AppService
 }
 
 // NewContainer creates a new dependency container with default implementations
@@ -27,6 +28,7 @@ func NewContainer() (*Container, error) {
 		configManager:  configManager,
 		authService:    service.NewAuthService(configManager),
 		projectService: service.NewProjectService(configManager),
+		appService:     service.NewAppService(configManager),
 	}, nil
 }
 
@@ -42,6 +44,20 @@ func NewContainerWithServices(
 	}
 }
 
+// NewContainerWithAllServices creates a container with all custom service implementations.
+// This is useful for testing with mock services including app service.
+func NewContainerWithAllServices(
+	authService iface.AuthService,
+	projectService iface.ProjectService,
+	appService iface.AppService,
+) *Container {
+	return &Container{
+		authService:    authService,
+		projectService: projectService,
+		appService:     appService,
+	}
+}
+
 // AuthService returns the authentication service
 func (c *Container) AuthService() iface.AuthService {
 	return c.authService
@@ -50,6 +66,11 @@ func (c *Container) AuthService() iface.AuthService {
 // ProjectService returns the project service
 func (c *Container) ProjectService() iface.ProjectService {
 	return c.projectService
+}
+
+// AppService returns the app service
+func (c *Container) AppService() iface.AppService {
+	return c.appService
 }
 
 // ConfigManager returns the config manager

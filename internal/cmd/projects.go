@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/AlecAivazis/survey/v2"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
 	"github.com/spf13/cobra"
 )
@@ -16,8 +17,10 @@ type ProjectsCommand struct {
 	cmd  *cobra.Command
 
 	// Subcommands
-	listCmd *ProjectsListCommand
-	getCmd  *ProjectsGetCommand
+	listCmd   *ProjectsListCommand
+	getCmd    *ProjectsGetCommand
+	createCmd *ProjectsCreateCommand
+	deleteCmd *ProjectsDeleteCommand
 }
 
 // NewProjectsCommand creates a new projects command
@@ -38,10 +41,14 @@ Use subcommands to list, create, or manage your projects.`,
 	// Initialize subcommands
 	p.listCmd = NewProjectsListCommand(p)
 	p.getCmd = NewProjectsGetCommand(p)
+	p.createCmd = NewProjectsCreateCommand(p)
+	p.deleteCmd = NewProjectsDeleteCommand(p)
 
 	// Add subcommands
 	p.cmd.AddCommand(p.listCmd.Command())
 	p.cmd.AddCommand(p.getCmd.Command())
+	p.cmd.AddCommand(p.createCmd.Command())
+	p.cmd.AddCommand(p.deleteCmd.Command())
 
 	return p
 }
@@ -274,6 +281,231 @@ func (g *ProjectsGetCommand) outputDetail(project *iface.Project) error {
 		}
 		w.Flush()
 	}
+
+	return nil
+}
+
+// ProjectsCreateCommand represents the projects create command
+type ProjectsCreateCommand struct {
+	parent *ProjectsCommand
+	cmd    *cobra.Command
+}
+
+// NewProjectsCreateCommand creates a new projects create command
+func NewProjectsCreateCommand(parent *ProjectsCommand) *ProjectsCreateCommand {
+	c := &ProjectsCreateCommand{
+		parent: parent,
+	}
+
+	c.cmd = &cobra.Command{
+		Use:   "create",
+		Short: "Create a new project",
+		Long: `Create a new project with an interactive wizard.
+
+This command will guide you through the process of creating a new project,
+including selecting the plan type and region.
+
+Examples:
+  kamui projects create`,
+		RunE: c.Run,
+	}
+
+	return c
+}
+
+// Command returns the underlying cobra command
+func (c *ProjectsCreateCommand) Command() *cobra.Command {
+	return c.cmd
+}
+
+// Run executes the projects create command with interactive wizard
+func (c *ProjectsCreateCommand) Run(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
+	projectService := c.parent.Root().Container().ProjectService()
+
+	// Step 1: Project name
+	var name string
+	if err := survey.AskOne(&survey.Input{
+		Message: "Project name:",
+	}, &name, survey.WithValidator(survey.Required)); err != nil {
+		return err
+	}
+
+	// Step 2: Description (optional)
+	var description string
+	if err := survey.AskOne(&survey.Input{
+		Message: "Description (optional, max 80 chars):",
+	}, &description); err != nil {
+		return err
+	}
+
+	// Truncate description if too long
+	if len(description) > 80 {
+		description = description[:80]
+	}
+
+	// Step 3: Plan type
+	planTypes := []string{"Free", "Pro"}
+	planTypeMap := map[string]string{
+		"Free": "free",
+		"Pro":  "pro",
+	}
+
+	var selectedPlan string
+	if err := survey.AskOne(&survey.Select{
+		Message: "Plan type:",
+		Options: planTypes,
+		Default: "Free",
+	}, &selectedPlan); err != nil {
+		return err
+	}
+
+	planType := planTypeMap[selectedPlan]
+
+	// Step 4: Region
+	regions := []string{"Tokyo", "Singapore"}
+	regionMap := map[string]string{
+		"Tokyo":     "tokyo",
+		"Singapore": "singapore",
+	}
+
+	var selectedRegion string
+	if err := survey.AskOne(&survey.Select{
+		Message: "Region:",
+		Options: regions,
+		Default: "Tokyo",
+	}, &selectedRegion); err != nil {
+		return err
+	}
+
+	region := regionMap[selectedRegion]
+
+	// Create the project
+	fmt.Println("\nCreating project...")
+
+	input := &iface.CreateProjectInput{
+		Name:        name,
+		Description: description,
+		PlanType:    planType,
+		Region:      region,
+	}
+
+	if err := projectService.CreateProject(ctx, input); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ Project \"%s\" created successfully!\n", name)
+	fmt.Printf("  Plan:   %s\n", planType)
+	fmt.Printf("  Region: %s\n", region)
+	fmt.Println("\nNext steps:")
+	fmt.Printf("  kamui projects list          - View your projects\n")
+	fmt.Printf("  kamui apps create            - Create an app in this project\n")
+
+	return nil
+}
+
+// ProjectsDeleteCommand represents the projects delete command
+type ProjectsDeleteCommand struct {
+	parent *ProjectsCommand
+	cmd    *cobra.Command
+}
+
+// NewProjectsDeleteCommand creates a new projects delete command
+func NewProjectsDeleteCommand(parent *ProjectsCommand) *ProjectsDeleteCommand {
+	d := &ProjectsDeleteCommand{
+		parent: parent,
+	}
+
+	d.cmd = &cobra.Command{
+		Use:   "delete <project-name-or-id>",
+		Short: "Delete a project",
+		Long: `Delete a project and all its resources.
+
+You can specify the project by name or ID. The command will search for
+a matching project and confirm before deletion.
+
+WARNING: This action is irreversible. All apps, databases, and other resources
+in the project will be permanently deleted.
+
+Examples:
+  kamui projects delete my-project
+  kamui projects delete 5f809f2f-0787-40ca-9a43-a3a59edb5400`,
+		Args: cobra.ExactArgs(1),
+		RunE: d.Run,
+	}
+
+	d.cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
+	return d
+}
+
+// Command returns the underlying cobra command
+func (d *ProjectsDeleteCommand) Command() *cobra.Command {
+	return d.cmd
+}
+
+// Run executes the projects delete command
+func (d *ProjectsDeleteCommand) Run(cmd *cobra.Command, args []string) error {
+	nameOrID := args[0]
+	ctx := cmd.Context()
+
+	projectService := d.parent.Root().Container().ProjectService()
+
+	// Fetch all projects to find by name or ID
+	projects, err := projectService.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Find matching project by name or ID
+	var project *iface.Project
+	for i := range projects {
+		p := &projects[i]
+		if p.ID == nameOrID || p.Name == nameOrID {
+			project = p
+			break
+		}
+	}
+
+	if project == nil {
+		return fmt.Errorf("project not found: %s\n\nUse 'kamui projects list' to see available projects", nameOrID)
+	}
+
+	// Check for --yes flag
+	skipConfirm, _ := cmd.Flags().GetBool("yes")
+
+	if !skipConfirm {
+		// Show warning
+		fmt.Printf("\n⚠️  WARNING: You are about to delete the following project:\n\n")
+		fmt.Printf("  Name:   %s\n", project.Name)
+		fmt.Printf("  ID:     %s\n", project.ID)
+		fmt.Printf("  Apps:   %d\n", len(project.Apps))
+		fmt.Printf("  DBs:    %d\n", len(project.Databases))
+		fmt.Println("\n  This action is IRREVERSIBLE. All resources will be permanently deleted.")
+
+		// Confirmation prompt
+		var confirm bool
+		if err := survey.AskOne(&survey.Confirm{
+			Message: fmt.Sprintf("Are you sure you want to delete project \"%s\"?", project.Name),
+			Default: false,
+		}, &confirm); err != nil {
+			return err
+		}
+
+		if !confirm {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	fmt.Println("\nDeleting project...")
+
+	if err := projectService.DeleteProject(ctx, project.ID); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ Project \"%s\" deleted successfully.\n", project.Name)
 
 	return nil
 }

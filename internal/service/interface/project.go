@@ -29,8 +29,8 @@ type Project struct {
 // App represents a Kamui application
 type App struct {
 	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	DisplayName string         `json:"display_name,omitempty"`
+	Name        string         `json:"app_name"`
+	DisplayName string         `json:"app_display_name,omitempty"`
 	Status      *ProjectStatus `json:"status,omitempty"`
 	URL         string         `json:"url,omitempty"`
 	AppType     string         `json:"app_type"`
@@ -44,6 +44,14 @@ type Database struct {
 	SpecType string `json:"spec_type"`
 }
 
+// CreateProjectInput represents the input for creating a project
+type CreateProjectInput struct {
+	Name        string
+	Description string
+	PlanType    string
+	Region      string
+}
+
 // ProjectService defines the interface for project operations
 type ProjectService interface {
 	// ListProjects returns all projects for the authenticated user
@@ -51,5 +59,11 @@ type ProjectService interface {
 
 	// GetProject returns a project by ID
 	GetProject(ctx context.Context, id string) (*Project, error)
+
+	// CreateProject creates a new project
+	CreateProject(ctx context.Context, input *CreateProjectInput) error
+
+	// DeleteProject deletes a project by ID
+	DeleteProject(ctx context.Context, id string) error
 }
 
