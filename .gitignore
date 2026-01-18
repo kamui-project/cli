@@ -33,3 +33,4 @@ Thumbs.db
 # Local config (should never be committed)
 config.json
 
+memo
