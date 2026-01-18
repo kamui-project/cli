@@ -1,74 +1,106 @@
 # Kamui CLI
 
-Command-line interface for [Kamui Platform](https://kamui-platform.com) - a PaaS for deploying and managing applications.
+[![Release](https://img.shields.io/github/v/release/kamui-project/cli)](https://github.com/kamui-project/cli/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kamui-project/cli)](https://goreportcard.com/report/github.com/kamui-project/cli)
+
+Command-line interface for [Kamui Platform](https://kamui-platform.com) - a PaaS for deploying and managing applications, databases, and cron jobs with ease.
+
+## Features
+
+- 🔐 **Secure Authentication** - OAuth 2.0 with GitHub SSO
+- 📦 **Project Management** - List and manage your projects
+- 🖥️ **Cross-Platform** - macOS, Linux, and Windows support
+- 📄 **Multiple Output Formats** - Text tables or JSON for scripting
 
 ## Installation
 
-### Using Go
+### Homebrew (Recommended for macOS/Linux)
 
 ```bash
-go install github.com/kamui-project/kamui-cli/cmd/kamui@latest
+brew install kamui-project/tap/kamui
 ```
 
 ### Download Binary
 
-Download the latest release from [GitHub Releases](https://github.com/kamui-project/kamui-cli/releases).
+Download the latest release from [GitHub Releases](https://github.com/kamui-project/cli/releases).
 
-#### macOS
+<details>
+<summary>macOS</summary>
 
 ```bash
-# Intel
-curl -L https://github.com/kamui-project/kamui-cli/releases/latest/download/kamui_darwin_amd64.tar.gz | tar xz
+# Apple Silicon (M1/M2/M3)
+curl -L https://github.com/kamui-project/cli/releases/latest/download/kamui_darwin_arm64.tar.gz | tar xz
 sudo mv kamui /usr/local/bin/
 
-# Apple Silicon
-curl -L https://github.com/kamui-project/kamui-cli/releases/latest/download/kamui_darwin_arm64.tar.gz | tar xz
+# Intel
+curl -L https://github.com/kamui-project/cli/releases/latest/download/kamui_darwin_amd64.tar.gz | tar xz
 sudo mv kamui /usr/local/bin/
 ```
 
-#### Linux
+</details>
+
+<details>
+<summary>Linux</summary>
 
 ```bash
 # x86_64
-curl -L https://github.com/kamui-project/kamui-cli/releases/latest/download/kamui_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/kamui-project/cli/releases/latest/download/kamui_linux_amd64.tar.gz | tar xz
 sudo mv kamui /usr/local/bin/
 
 # ARM64
-curl -L https://github.com/kamui-project/kamui-cli/releases/latest/download/kamui_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/kamui-project/cli/releases/latest/download/kamui_linux_arm64.tar.gz | tar xz
 sudo mv kamui /usr/local/bin/
 ```
 
-#### Windows
+</details>
 
-Download `kamui_windows_amd64.zip` from [GitHub Releases](https://github.com/kamui-project/kamui-cli/releases) and add to your PATH.
+<details>
+<summary>Windows</summary>
 
-### Using Homebrew (macOS/Linux)
+Download `kamui_windows_amd64.zip` from [GitHub Releases](https://github.com/kamui-project/cli/releases) and add to your PATH.
+
+</details>
+
+### Using Go
 
 ```bash
-brew tap kamui-project/tap
-brew install kamui
+go install github.com/kamui-project/cli/cmd/kamui@latest
 ```
 
 ## Quick Start
 
-1. **Login** to your Kamui account:
+### 1. Login
 
 ```bash
 kamui login
 ```
 
-This will open a browser window for authentication.
+This opens a browser window for GitHub authentication. After successful login, your credentials are stored securely.
 
-2. **List** your projects:
+### 2. List Projects
 
 ```bash
 kamui projects list
 ```
 
-3. **Logout** when done:
+Output:
+```
+ID                                    NAME            PLAN  REGION  APPS  DATABASES
+5f809f2f-0787-40ca-9a43-a3a59edb5400  my-project      free  tokyo   2     1
+21065335-ade9-4e63-bfcc-284760fa3957  another-app     pro   osaka   3     0
+```
+
+### 3. Get Project Details
 
 ```bash
-kamui logout
+kamui projects get <project-id>
+```
+
+### 4. JSON Output (for scripting)
+
+```bash
+kamui projects list -o json
 ```
 
 ## Commands
@@ -77,7 +109,7 @@ kamui logout
 
 | Command | Description |
 |---------|-------------|
-| `kamui login` | Authenticate with Kamui Platform |
+| `kamui login` | Authenticate with Kamui Platform via GitHub |
 | `kamui logout` | Clear stored credentials |
 
 ### Projects
@@ -85,6 +117,7 @@ kamui logout
 | Command | Description |
 |---------|-------------|
 | `kamui projects list` | List all projects |
+| `kamui projects get <id>` | Get project details by ID |
 
 ### Global Flags
 
@@ -98,6 +131,11 @@ kamui logout
 
 Credentials are stored in `~/.kamui/config.json`. This file contains your OAuth tokens and should be kept secure.
 
+```bash
+# View config location
+ls ~/.kamui/
+```
+
 ## Development
 
 ### Prerequisites
@@ -107,32 +145,62 @@ Credentials are stored in `~/.kamui/config.json`. This file contains your OAuth 
 ### Building from Source
 
 ```bash
-git clone https://github.com/kamui-project/kamui-cli.git
-cd kamui-cli
+git clone https://github.com/kamui-project/cli.git
+cd cli
 go build -o kamui ./cmd/kamui
 ```
 
 ### Running Tests
 
 ```bash
-go test ./...
+go test -v ./...
 ```
 
 ### Project Structure
 
 ```
-kamui-cli/
-├── cmd/kamui/          # Entry point
+cli/
+├── cmd/kamui/              # Entry point
 ├── internal/
-│   ├── api/            # HTTP client for Kamui API
-│   ├── auth/           # OAuth authentication
-│   ├── cmd/            # CLI commands (interface layer)
-│   ├── config/         # Configuration management
-│   └── service/        # Business logic (service layer)
-├── .goreleaser.yaml    # Release configuration
+│   ├── api/                # HTTP client for Kamui API
+│   ├── auth/               # OAuth 2.0 authentication flow
+│   ├── cmd/                # CLI commands (interface layer)
+│   ├── config/             # Configuration management
+│   ├── di/                 # Dependency injection container
+│   └── service/
+│       ├── interface/      # Service interfaces
+│       ├── auth.go         # Auth service implementation
+│       └── project.go      # Project service implementation
+├── .goreleaser.yaml        # Release configuration
 └── go.mod
 ```
 
+### Architecture
+
+The CLI follows a clean architecture pattern:
+
+- **Interface Layer** (`internal/cmd/`) - Cobra commands, user interaction
+- **Service Layer** (`internal/service/`) - Business logic, API orchestration
+- **API Layer** (`internal/api/`) - HTTP client for backend communication
+
+Services are injected via a DI container, making the code testable with mocks.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Links
+
+- [Kamui Platform](https://kamui-platform.com)
+- [Documentation](https://docs.kamui-platform.com)
+- [GitHub Issues](https://github.com/kamui-project/cli/issues)
