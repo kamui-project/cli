@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -286,6 +289,129 @@ func (c *Client) GetApp(ctx context.Context, appID string) (*AppDetailResponse, 
 	if err := c.Get(ctx, path, &resp); err != nil {
 		return nil, err
 	}
+	return &resp, nil
+}
+
+// CreateStaticAppRequest represents the request body for creating a static app via GitHub
+type CreateStaticAppRequest struct {
+	AppName          string `json:"app_name"`
+	ProjectID        string `json:"project_id"`
+	Replicas         int    `json:"replicas"`
+	AppSpecType      string `json:"app_spec_type"`
+	DeployType       string `json:"deploy_type"`
+	OrganizationName string `json:"organization_name"`
+	OwnerType        string `json:"owner_type"`
+	RepositoryName   string `json:"repository_name"`
+	RepositoryBranch string `json:"repository_branch"`
+	Directory        string `json:"directory,omitempty"`
+}
+
+// CreateStaticApp creates a new static app via GitHub repository
+func (c *Client) CreateStaticApp(ctx context.Context, req *CreateStaticAppRequest) (*AppCreateResponse, error) {
+	var resp AppCreateResponse
+	if err := c.Post(ctx, "/api/static-apps", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateStaticAppUploadRequest represents the parameters for creating a static app via file upload
+type CreateStaticAppUploadRequest struct {
+	ProjectID   string
+	AppName     string
+	Replicas    int
+	AppSpecType string
+	FilePath    string // local path to the ZIP file
+}
+
+// CreateStaticAppUpload creates a new static app by uploading a ZIP file
+func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticAppUploadRequest) (*AppCreateResponse, error) {
+	// Open the file
+	file, err := os.Open(req.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Create a buffer and multipart writer
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add form fields
+	if err := writer.WriteField("project_id", req.ProjectID); err != nil {
+		return nil, fmt.Errorf("failed to write project_id field: %w", err)
+	}
+	if err := writer.WriteField("app_name", req.AppName); err != nil {
+		return nil, fmt.Errorf("failed to write app_name field: %w", err)
+	}
+	if err := writer.WriteField("replicas", fmt.Sprintf("%d", req.Replicas)); err != nil {
+		return nil, fmt.Errorf("failed to write replicas field: %w", err)
+	}
+	if err := writer.WriteField("app_spec_type", req.AppSpecType); err != nil {
+		return nil, fmt.Errorf("failed to write app_spec_type field: %w", err)
+	}
+
+	// Add the file
+	part, err := writer.CreateFormFile("file", filepath.Base(req.FilePath))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	// Close the writer to finalize the multipart form
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Create the request
+	url := c.baseURL + "/api/static-apps/upload"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	if c.token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	// Send the request
+	httpResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check for error status codes
+	if httpResp.StatusCode >= 400 {
+		var errResp ErrorResponse
+		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Message != "" {
+			return nil, &APIError{
+				StatusCode: httpResp.StatusCode,
+				Message:    errResp.Message,
+			}
+		}
+		return nil, &APIError{
+			StatusCode: httpResp.StatusCode,
+			Message:    fmt.Sprintf("request failed with status %d", httpResp.StatusCode),
+		}
+	}
+
+	// Parse response
+	var resp AppCreateResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
 	return &resp, nil
 }
 

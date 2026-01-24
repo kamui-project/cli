@@ -58,6 +58,52 @@ type AppDetail struct {
 	Status        *ProjectStatus
 }
 
+// CreateStaticAppInput represents the input for creating a static app via GitHub
+type CreateStaticAppInput struct {
+	ProjectID        string
+	AppName          string
+	Replicas         int
+	AppSpecType      string // nano, small, medium, large
+	DeployType       string // github
+	OrganizationName string
+	OwnerType        string // Organization or User
+	RepositoryName   string
+	RepositoryBranch string
+	Directory        string
+}
+
+// CreateStaticAppUploadInput represents the input for creating a static app via file upload
+type CreateStaticAppUploadInput struct {
+	ProjectID   string
+	AppName     string
+	Replicas    int
+	AppSpecType string // nano, small, medium, large
+	FilePath    string // local path to the ZIP file
+}
+
+// UpdateStaticAppInput represents the input for updating a static app via GitHub
+type UpdateStaticAppInput struct {
+	AppID            string
+	ProjectID        string
+	Replicas         int
+	AppSpecType      string
+	DeployType       string
+	OrganizationName string
+	OwnerType        string
+	RepositoryName   string
+	RepositoryBranch string
+	Directory        string
+}
+
+// UpdateStaticAppUploadInput represents the input for updating a static app via file upload
+type UpdateStaticAppUploadInput struct {
+	AppID       string
+	ProjectID   string
+	Replicas    int
+	AppSpecType string
+	FilePath    string
+}
+
 // AppService defines the interface for app operations
 type AppService interface {
 	// GetInstallations returns all GitHub App installations for the user
@@ -66,8 +112,14 @@ type AppService interface {
 	// GetBranches returns branches for a repository
 	GetBranches(ctx context.Context, owner, repo string) ([]Branch, error)
 
-	// CreateApp creates a new application
+	// CreateApp creates a new dynamic application
 	CreateApp(ctx context.Context, input *CreateAppInput) (*CreateAppOutput, error)
+
+	// CreateStaticApp creates a new static app via GitHub repository
+	CreateStaticApp(ctx context.Context, input *CreateStaticAppInput) (*CreateAppOutput, error)
+
+	// CreateStaticAppUpload creates a new static app via file upload
+	CreateStaticAppUpload(ctx context.Context, input *CreateStaticAppUploadInput) (*CreateAppOutput, error)
 
 	// ListApps returns all apps for a project
 	ListApps(ctx context.Context, projectID string) ([]App, error)

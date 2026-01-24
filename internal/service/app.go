@@ -242,3 +242,81 @@ func (s *appService) DeleteApp(ctx context.Context, appID string) error {
 	return nil
 }
 
+// CreateStaticApp creates a new static app via GitHub repository
+func (s *appService) CreateStaticApp(ctx context.Context, input *iface.CreateStaticAppInput) (*iface.CreateAppOutput, error) {
+	client, err := s.getAPIClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the request
+	req := &api.CreateStaticAppRequest{
+		AppName:          input.AppName,
+		ProjectID:        input.ProjectID,
+		Replicas:         input.Replicas,
+		AppSpecType:      input.AppSpecType,
+		DeployType:       input.DeployType,
+		OrganizationName: input.OrganizationName,
+		OwnerType:        input.OwnerType,
+		RepositoryName:   input.RepositoryName,
+		RepositoryBranch: input.RepositoryBranch,
+		Directory:        input.Directory,
+	}
+
+	// Set defaults
+	if req.Replicas == 0 {
+		req.Replicas = 1
+	}
+	if req.AppSpecType == "" {
+		req.AppSpecType = "nano"
+	}
+	if req.DeployType == "" {
+		req.DeployType = "github"
+	}
+
+	resp, err := client.CreateStaticApp(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static app: %w", err)
+	}
+
+	return &iface.CreateAppOutput{
+		ID:   resp.AppID,
+		Name: input.AppName,
+	}, nil
+}
+
+// CreateStaticAppUpload creates a new static app via file upload
+func (s *appService) CreateStaticAppUpload(ctx context.Context, input *iface.CreateStaticAppUploadInput) (*iface.CreateAppOutput, error) {
+	client, err := s.getAPIClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the request
+	req := &api.CreateStaticAppUploadRequest{
+		ProjectID:   input.ProjectID,
+		AppName:     input.AppName,
+		Replicas:    input.Replicas,
+		AppSpecType: input.AppSpecType,
+		FilePath:    input.FilePath,
+	}
+
+	// Set defaults
+	if req.Replicas == 0 {
+		req.Replicas = 1
+	}
+	if req.AppSpecType == "" {
+		req.AppSpecType = "nano"
+	}
+
+	resp, err := client.CreateStaticAppUpload(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create static app: %w", err)
+	}
+
+	return &iface.CreateAppOutput{
+		ID:   resp.AppID,
+		Name: input.AppName,
+	}, nil
+}
+

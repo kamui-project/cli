@@ -118,6 +118,21 @@ kamui projects list -o json
 |---------|-------------|
 | `kamui projects list` | List all projects |
 | `kamui projects get <id>` | Get project details by ID |
+| `kamui projects create` | Create a new project |
+| `kamui projects delete <id>` | Delete a project |
+
+### Apps
+
+| Command | Description |
+|---------|-------------|
+| `kamui apps list -p <project>` | List all apps in a project |
+| `kamui apps create` | Create a new app (dynamic or static) |
+| `kamui apps delete <id>` | Delete an app |
+
+The `apps create` command supports three app types:
+- **Dynamic app** - Server-side applications (Node.js, Go, Python)
+- **Static app (GitHub)** - Static sites from GitHub repository
+- **Static app (ZIP upload)** - Static sites from local ZIP file
 
 ### Global Flags
 
