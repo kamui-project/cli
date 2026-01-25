@@ -363,23 +363,9 @@ func (c *ProjectsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 
 	planType := planTypeMap[selectedPlan]
 
-	// Step 4: Region
-	regions := []string{"Tokyo", "Singapore"}
-	regionMap := map[string]string{
-		"Tokyo":     "tokyo",
-		"Singapore": "singapore",
-	}
-
-	var selectedRegion string
-	if err := survey.AskOne(&survey.Select{
-		Message: "Region:",
-		Options: regions,
-		Default: "Tokyo",
-	}, &selectedRegion); err != nil {
-		return err
-	}
-
-	region := regionMap[selectedRegion]
+	// Step 4: Region (Tokyo only)
+	region := "tokyo"
+	fmt.Println("Region: Tokyo")
 
 	// Create the project
 	fmt.Println("\nCreating project...")
