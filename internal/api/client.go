@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+const (
+	kamuiClientTypeHeader = "X-Kamui-Client-Type"
+	kamuiClientTypeCLI    = "cli"
+)
+
 // Client is an HTTP client for the Kamui API
 type Client struct {
 	baseURL    string
@@ -58,6 +63,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
 
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -374,6 +380,7 @@ func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticApp
 
 	// Set headers
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	httpReq.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
 	if c.token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -414,4 +421,3 @@ func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticApp
 
 	return &resp, nil
 }
-

@@ -23,6 +23,10 @@ const (
 
 	// DefaultClientName is the default name for dynamic client registration
 	DefaultClientName = "Kamui CLI"
+
+	// kamuiClientTypeHeader identifies requests originating from the CLI.
+	kamuiClientTypeHeader = "X-Kamui-Client-Type"
+	kamuiClientTypeCLI    = "cli"
 )
 
 // OAuthResult contains the result of an OAuth flow
@@ -100,6 +104,7 @@ func (o *OAuthFlow) RegisterClient(ctx context.Context, redirectURI string) (*Cl
 		return nil, fmt.Errorf("failed to create registration request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -215,6 +220,7 @@ func (o *OAuthFlow) RefreshTokens(ctx context.Context, refreshToken string) (*OA
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -330,6 +336,7 @@ func (o *OAuthFlow) exchangeCodeForTokens(ctx context.Context, code, redirectURI
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
