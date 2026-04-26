@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
@@ -38,6 +39,31 @@ func TestRegisterCodexMCPServer_CreatesNewFile(t *testing.T) {
 		t.Errorf("Authorization = %v, want Bearer secret-token", headers["Authorization"])
 	}
 	assertMode0600(t, path)
+}
+
+func TestRegisterCodexMCPServer_EmitsInlineHeadersTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	err := RegisterCodexMCPServer(path, "kamui",
+		"https://api.kamui-platform.com/mcp",
+		map[string]string{"Authorization": "Bearer secret-token"},
+	)
+	if err != nil {
+		t.Fatalf("RegisterCodexMCPServer: %v", err)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	got := string(b)
+	if strings.Contains(got, "[mcp_servers.kamui.headers]") {
+		t.Fatalf("headers emitted as sub-table, want inline table:\n%s", got)
+	}
+	if !strings.Contains(got, "headers = {") {
+		t.Fatalf("inline headers table missing:\n%s", got)
+	}
 }
 
 func TestRegisterCodexMCPServer_PreservesUnrelatedTables(t *testing.T) {

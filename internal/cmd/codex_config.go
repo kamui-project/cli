@@ -8,6 +8,15 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// codexMCPServerEntry is the TOML shape Codex expects under
+// [mcp_servers.<name>]. `headers` is emitted as an inline table so the
+// generated config matches the documented format exactly:
+// headers = { Authorization = "Bearer ..." }.
+type codexMCPServerEntry struct {
+	URL     string            `toml:"url"`
+	Headers map[string]string `toml:"headers,inline,omitempty"`
+}
+
 // codexConfigPath is the user-scope Codex CLI settings file. It is TOML,
 // not JSON, so it needs its own merger — the existing RegisterMCPServer
 // only knows how to round-trip JSON.
@@ -47,19 +56,13 @@ func RegisterCodexMCPServer(path, name, url string, headers map[string]string) e
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	entry := map[string]any{
-		"url": url,
-	}
+	entry := codexMCPServerEntry{URL: url}
 	if len(headers) > 0 {
-		// Codex's TOML schema accepts an inline-table 'headers' field;
-		// represented as a plain map at marshal time the library emits
-		// it as either inline or sub-table depending on size. Either
-		// form is accepted by Codex.
-		h := make(map[string]any, len(headers))
+		h := make(map[string]string, len(headers))
 		for k, v := range headers {
 			h[k] = v
 		}
-		entry["headers"] = h
+		entry.Headers = h
 	}
 	servers[name] = entry
 	root["mcp_servers"] = servers
