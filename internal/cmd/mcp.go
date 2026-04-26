@@ -631,7 +631,7 @@ func printMCPSetupInstructions(apiURL, token, client string) {
 		fmt.Fprintln(w, "▸ Codex (~/.codex/config.toml)")
 		fmt.Fprintln(w, "    [mcp_servers.kamui]")
 		fmt.Fprintf(w, "    url = \"%s\"\n", mcpURL)
-		fmt.Fprintf(w, "    headers = { Authorization = \"Bearer %s\" }\n", token)
+		fmt.Fprintf(w, "    http_headers = { Authorization = \"Bearer %s\" }\n", token)
 	}
 
 	fmt.Fprintln(w, "")

@@ -9,12 +9,12 @@ import (
 )
 
 // codexMCPServerEntry is the TOML shape Codex expects under
-// [mcp_servers.<name>]. `headers` is emitted as an inline table so the
+// [mcp_servers.<name>]. `http_headers` is emitted as an inline table so the
 // generated config matches the documented format exactly:
-// headers = { Authorization = "Bearer ..." }.
+// http_headers = { Authorization = "Bearer ..." }.
 type codexMCPServerEntry struct {
-	URL     string            `toml:"url"`
-	Headers map[string]string `toml:"headers,inline,omitempty"`
+	URL         string            `toml:"url"`
+	HTTPHeaders map[string]string `toml:"http_headers,inline,omitempty"`
 }
 
 // codexConfigPath is the user-scope Codex CLI settings file. It is TOML,
@@ -62,7 +62,7 @@ func RegisterCodexMCPServer(path, name, url string, headers map[string]string) e
 		for k, v := range headers {
 			h[k] = v
 		}
-		entry.Headers = h
+		entry.HTTPHeaders = h
 	}
 	servers[name] = entry
 	root["mcp_servers"] = servers

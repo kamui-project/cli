@@ -112,7 +112,7 @@ func TestRegisterMCPClient_CodexEndToEnd(t *testing.T) {
 	if kamui["url"] != "https://api.test/mcp" {
 		t.Errorf("url = %v, want https://api.test/mcp", kamui["url"])
 	}
-	headers, _ := kamui["headers"].(map[string]any)
+	headers, _ := kamui["http_headers"].(map[string]any)
 	if !strings.Contains(headers["Authorization"].(string), "secret-pat") {
 		t.Errorf("Authorization missing token: %v", headers["Authorization"])
 	}

@@ -34,7 +34,7 @@ func TestRegisterCodexMCPServer_CreatesNewFile(t *testing.T) {
 	if got["url"] != "https://api.kamui-platform.com/mcp" {
 		t.Errorf("url = %v, want kamui mcp url", got["url"])
 	}
-	headers, _ := got["headers"].(map[string]any)
+	headers, _ := got["http_headers"].(map[string]any)
 	if headers["Authorization"] != "Bearer secret-token" {
 		t.Errorf("Authorization = %v, want Bearer secret-token", headers["Authorization"])
 	}
@@ -58,11 +58,11 @@ func TestRegisterCodexMCPServer_EmitsInlineHeadersTable(t *testing.T) {
 		t.Fatalf("read config: %v", err)
 	}
 	got := string(b)
-	if strings.Contains(got, "[mcp_servers.kamui.headers]") {
-		t.Fatalf("headers emitted as sub-table, want inline table:\n%s", got)
+	if strings.Contains(got, "[mcp_servers.kamui.http_headers]") {
+		t.Fatalf("http_headers emitted as sub-table, want inline table:\n%s", got)
 	}
-	if !strings.Contains(got, "headers = {") {
-		t.Fatalf("inline headers table missing:\n%s", got)
+	if !strings.Contains(got, "http_headers = {") {
+		t.Fatalf("inline http_headers table missing:\n%s", got)
 	}
 }
 
