@@ -36,29 +36,19 @@ func (s *authService) Login(ctx context.Context) error {
 		return fmt.Errorf("failed to get API URL: %w", err)
 	}
 
-	// Create OAuth flow
+	// Create OAuth flow. Login() always performs a fresh DCR — we no longer
+	// reuse stored client credentials across logins.
 	oauthFlow := auth.NewOAuthFlow(apiURL)
 
-	// Check for existing client credentials
-	clientID, clientSecret, err := s.configManager.GetClientCredentials()
-	if err != nil {
-		return fmt.Errorf("failed to get client credentials: %w", err)
-	}
-
-	// If we have stored credentials, use them
-	if clientID != "" {
-		oauthFlow.SetClientCredentials(clientID, clientSecret)
-	}
-
-	// Perform OAuth flow (will register if no credentials)
 	result, err := oauthFlow.Login(ctx)
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Save client credentials if newly registered
+	// Save the freshly-minted client credentials. They're needed for token
+	// refresh (until the next login overwrites them).
 	creds := oauthFlow.GetClientCredentials()
-	if creds != nil && clientID == "" {
+	if creds != nil {
 		if err := s.configManager.SaveClientCredentials(creds.ClientID, creds.ClientSecret); err != nil {
 			return fmt.Errorf("failed to save client credentials: %w", err)
 		}

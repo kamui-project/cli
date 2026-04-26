@@ -145,16 +145,18 @@ func (o *OAuthFlow) Login(ctx context.Context) (*OAuthResult, error) {
 
 	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
 
-	// If no client credentials, register first
-	if o.clientID == "" {
-		fmt.Println("Registering CLI with Kamui Platform...")
-		creds, err := o.RegisterClient(ctx, redirectURI)
-		if err != nil {
-			return nil, fmt.Errorf("failed to register client: %w", err)
-		}
-		o.clientID = creds.ClientID
-		o.clientSecret = creds.ClientSecret
+	// Always register a fresh OAuth client on login. Reusing stored client_id
+	// across logins caused state-mismatch failures when the server-side
+	// oauth_clients table was rebuilt (orphaned client_id in CLI config →
+	// "Invalid parameter" on /oauth/authorize). Each login mints fresh
+	// throwaway credentials; the redirect_uri is always loopback so old
+	// orphaned client rows can't be abused remotely.
+	creds, err := o.RegisterClient(ctx, redirectURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register client: %w", err)
 	}
+	o.clientID = creds.ClientID
+	o.clientSecret = creds.ClientSecret
 
 	// Generate a random state parameter
 	state, err := generateRandomState()
