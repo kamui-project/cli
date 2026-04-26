@@ -421,3 +421,60 @@ func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticApp
 
 	return &resp, nil
 }
+
+// ── Personal Access Token ────────────────────────────────────────────────────
+
+// PATInfo is a token's metadata (no plaintext value).
+type PATInfo struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	ExpiresAt  string  `json:"expires_at"`
+	CreatedAt  string  `json:"created_at"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+}
+
+type listPATsResponse struct {
+	Tokens []PATInfo `json:"tokens"`
+}
+
+type createPATRequest struct {
+	Name          string `json:"name"`
+	ExpiresInDays int    `json:"expires_in_days"`
+}
+
+type createPATResponse struct {
+	Message string `json:"message"`
+	TokenID string `json:"token_id"`
+	Token   string `json:"token"`
+}
+
+// CreatePAT issues a new Personal Access Token. The plaintext token is
+// returned only here and cannot be retrieved later.
+func (c *Client) CreatePAT(ctx context.Context, name string, expiresInDays int) (token, id string, err error) {
+	req := &createPATRequest{Name: name, ExpiresInDays: expiresInDays}
+	var resp createPATResponse
+	if err := c.Post(ctx, "/api/tokens", req, &resp); err != nil {
+		return "", "", err
+	}
+	return resp.Token, resp.TokenID, nil
+}
+
+// ListPATs returns the user's PATs. When includeOAuth is true, short-lived
+// CLI/MCP OAuth session tokens are also returned (default: hidden).
+func (c *Client) ListPATs(ctx context.Context, includeOAuth bool) ([]PATInfo, error) {
+	path := "/api/tokens"
+	if includeOAuth {
+		path += "?include_oauth=true"
+	}
+	var resp listPATsResponse
+	if err := c.Get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Tokens, nil
+}
+
+// DeletePAT revokes a PAT by its ID. Subsequent API calls using the deleted
+// token return 401.
+func (c *Client) DeletePAT(ctx context.Context, id string) error {
+	return c.Delete(ctx, "/api/tokens/"+id, nil)
+}

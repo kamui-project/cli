@@ -15,6 +15,7 @@ type Container struct {
 	authService    iface.AuthService
 	projectService iface.ProjectService
 	appService     iface.AppService
+	tokensService  iface.TokensService
 }
 
 // NewContainer creates a new dependency container with default implementations
@@ -30,6 +31,7 @@ func NewContainer() (*Container, error) {
 		authService:    authService,
 		projectService: service.NewProjectService(configManager, authService),
 		appService:     service.NewAppService(configManager, authService),
+		tokensService:  service.NewTokensService(configManager, authService),
 	}, nil
 }
 
@@ -72,6 +74,11 @@ func (c *Container) ProjectService() iface.ProjectService {
 // AppService returns the app service
 func (c *Container) AppService() iface.AppService {
 	return c.appService
+}
+
+// TokensService returns the personal access token service
+func (c *Container) TokensService() iface.TokensService {
+	return c.tokensService
 }
 
 // ConfigManager returns the config manager
