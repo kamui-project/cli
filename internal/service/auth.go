@@ -24,8 +24,9 @@ func NewAuthService(configManager *config.Manager) iface.AuthService {
 
 // Login performs OAuth authentication and saves credentials
 func (s *authService) Login(ctx context.Context) error {
-	// Check if already logged in
-	if s.IsLoggedIn() {
+	// Reject only if the current access token is still valid.
+	// Expired sessions are allowed to re-login directly without `kamui logout`.
+	if s.configManager.IsLoggedIn() {
 		return fmt.Errorf("already logged in. Use 'kamui logout' first to log out")
 	}
 

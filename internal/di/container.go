@@ -24,11 +24,12 @@ func NewContainer() (*Container, error) {
 		return nil, err
 	}
 
+	authService := service.NewAuthService(configManager)
 	return &Container{
 		configManager:  configManager,
-		authService:    service.NewAuthService(configManager),
-		projectService: service.NewProjectService(configManager),
-		appService:     service.NewAppService(configManager),
+		authService:    authService,
+		projectService: service.NewProjectService(configManager, authService),
+		appService:     service.NewAppService(configManager, authService),
 	}, nil
 }
 

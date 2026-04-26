@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/kamui-project/kamui-cli/internal/api"
-	"github.com/kamui-project/kamui-cli/internal/auth"
 	"github.com/kamui-project/kamui-cli/internal/config"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
 )
@@ -13,57 +12,20 @@ import (
 // appService implements iface.AppService
 type appService struct {
 	configManager *config.Manager
+	authService   iface.AuthService
 }
 
 // NewAppService creates a new app service
-func NewAppService(configManager *config.Manager) iface.AppService {
+func NewAppService(configManager *config.Manager, authService iface.AuthService) iface.AppService {
 	return &appService{
 		configManager: configManager,
+		authService:   authService,
 	}
-}
-
-// ensureAuthenticated checks if the user is logged in and refreshes token if needed
-func (s *appService) ensureAuthenticated(ctx context.Context) error {
-	cfg, err := s.configManager.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if cfg.AccessToken == "" && cfg.RefreshToken == "" {
-		return fmt.Errorf("not logged in. Please run 'kamui login' first")
-	}
-
-	if s.configManager.IsLoggedIn() {
-		return nil
-	}
-
-	if cfg.RefreshToken == "" {
-		return fmt.Errorf("session expired. Please run 'kamui login' again")
-	}
-
-	apiURL, err := s.configManager.GetAPIURL()
-	if err != nil {
-		return fmt.Errorf("failed to get API URL: %w", err)
-	}
-
-	oauthFlow := auth.NewOAuthFlow(apiURL)
-	oauthFlow.SetClientCredentials(cfg.ClientID, cfg.ClientSecret)
-
-	result, err := oauthFlow.RefreshTokens(ctx, cfg.RefreshToken)
-	if err != nil {
-		return fmt.Errorf("failed to refresh token: %w. Please run 'kamui login' again", err)
-	}
-
-	if err := s.configManager.SaveTokens(result.AccessToken, result.RefreshToken, result.ExpiresIn); err != nil {
-		return fmt.Errorf("failed to save refreshed tokens: %w", err)
-	}
-
-	return nil
 }
 
 // getAPIClient creates an API client with the current credentials
 func (s *appService) getAPIClient(ctx context.Context) (*api.Client, error) {
-	if err := s.ensureAuthenticated(ctx); err != nil {
+	if err := s.authService.EnsureAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
