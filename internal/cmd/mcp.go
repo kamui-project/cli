@@ -152,43 +152,39 @@ func (s *McpSetupCommand) Run(cmd *cobra.Command, _ []string) error {
 		apiURL = defaultAPIURL
 	}
 
-	// --register: write the token directly into the target client's
-	// config file. Never crosses a process boundary, so it can't leak
-	// via argv (ps / /proc/<pid>/cmdline) or via stdout/stderr.
-	if s.register {
-		if err := registerMCPClient(cmd.Context(), s.client, apiURL, plaintext); err != nil {
-			return fmt.Errorf("registration failed (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", id, id, err)
+	registered, err := persistMCPSetupCredentials(cmd.Context(), s.client, apiURL, id, plaintext, s.tokenFile, s.register)
+	if err != nil {
+		return err
+	}
+
+	if outputFormat == "json" {
+		if registered || s.tokenFile != "" {
+			return printSetupJSON(id, name, s.days, "", apiURL, s.client, registered)
 		}
-		if outputFormat == "json" {
-			return printSetupJSON(id, name, s.days, "", apiURL, s.client, true)
-		}
+		// JSON consumers explicitly asked for structured output — they want
+		// the token in the parsed result, not embedded in instructional text.
+		return printSetupJSON(id, name, s.days, plaintext, apiURL, s.client, false)
+	}
+
+	if registered {
 		fmt.Fprintf(os.Stderr, "✓ Personal Access Token created and registered with %s.\n", mcpClientDisplayName(s.client))
 		fmt.Fprintf(os.Stderr, "  ID:      %s\n", id)
 		fmt.Fprintf(os.Stderr, "  Name:    %s\n", name)
 		fmt.Fprintf(os.Stderr, "  Expires: %d days\n", s.days)
+		if s.tokenFile != "" {
+			fmt.Fprintf(os.Stderr, "  Token written to %s (mode 0600).\n", s.tokenFile)
+		}
 		printRevokeHint(os.Stderr, id)
 		return nil
 	}
 
 	// --token-file: write to file, do not print to stdout.
 	if s.tokenFile != "" {
-		if err := writeTokenFile(s.tokenFile, plaintext); err != nil {
-			return fmt.Errorf("failed to write token file (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", id, id, err)
-		}
-		if outputFormat == "json" {
-			return printSetupJSON(id, name, s.days, "", apiURL, s.client, false)
-		}
 		printPATCreated(id, name, s.days)
 		fmt.Fprintf(os.Stderr, "  Token written to %s (mode 0600).\n\n", s.tokenFile)
 		printMCPSetupInstructions(apiURL, tokenPlaceholder, s.client)
 		printRevokeHint(os.Stderr, id)
 		return nil
-	}
-
-	if outputFormat == "json" {
-		// JSON consumers explicitly asked for structured output — they want
-		// the token in the parsed result, not embedded in instructional text.
-		return printSetupJSON(id, name, s.days, plaintext, apiURL, s.client, false)
 	}
 
 	printPATCreated(id, name, s.days)
@@ -203,6 +199,37 @@ func (s *McpSetupCommand) Run(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stderr, "   Use --print-token to force, --token-file to capture, or --register for the safest path.")
 	}
 	return nil
+}
+
+// persistMCPSetupCredentials applies the secret-handling side effects for
+// `kamui mcp setup`:
+//   - optional direct registration into an MCP client config (--register)
+//   - optional plaintext token file write with mode 0600 (--token-file)
+//
+// It supports using both flags together, as documented.
+func persistMCPSetupCredentials(ctx context.Context, client, apiURL, tokenID, plaintext, tokenFile string, register bool) (bool, error) {
+	registered := false
+
+	// --register: write the token directly into the target client's
+	// config file. Never crosses a process boundary, so it can't leak
+	// via argv (ps / /proc/<pid>/cmdline) or via stdout/stderr.
+	if register {
+		if err := registerMCPClient(ctx, client, apiURL, plaintext); err != nil {
+			return false, fmt.Errorf("registration failed (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", tokenID, tokenID, err)
+		}
+		registered = true
+	}
+
+	if tokenFile != "" {
+		if err := writeTokenFile(tokenFile, plaintext); err != nil {
+			if registered {
+				return true, fmt.Errorf("token registered with %s but failed to write token file (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", mcpClientDisplayName(client), tokenID, tokenID, err)
+			}
+			return false, fmt.Errorf("failed to write token file (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", tokenID, tokenID, err)
+		}
+	}
+
+	return registered, nil
 }
 
 // ── mcp config <client> ─────────────────────────────────────────────────────
