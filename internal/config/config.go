@@ -5,8 +5,12 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -171,7 +175,49 @@ func (m *Manager) GetAccessToken() (string, error) {
 	return config.AccessToken, nil
 }
 
-// GetAPIURL returns the configured API URL
+// apiURLWarnOnce makes sure a corrupted/malicious api_url emits exactly
+// one warning per process even when GetAPIURL is called many times by
+// downstream services.
+var apiURLWarnOnce sync.Once
+
+// validateAPIURL enforces the constraints required to keep apiURL safe
+// for use in subprocess argv (registerClaudeCode used to embed it via
+// `--header "Authorization: Bearer ..."`) and for header construction:
+//   - https only — http/file/javascript schemes are rejected to prevent
+//     downgrade or scheme-confusion attacks
+//   - non-empty Host
+//   - no leading "-" — defense in depth against argv injection if the
+//     URL is ever passed to a child process expecting flag-style args
+//   - no embedded userinfo — credentials in the URL would round-trip to
+//     anywhere we use the URL, including logs
+func validateAPIURL(s string) error {
+	if s == "" {
+		return errors.New("api url is empty")
+	}
+	if strings.HasPrefix(s, "-") {
+		return fmt.Errorf("api url must not start with '-': %q", s)
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("api url is not a valid URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("api url must use https scheme (got %q)", u.Scheme)
+	}
+	if u.Host == "" {
+		return errors.New("api url must have a host")
+	}
+	if u.User != nil {
+		return errors.New("api url must not embed userinfo")
+	}
+	return nil
+}
+
+// GetAPIURL returns the configured API URL. A stored value that fails
+// validation falls back to DefaultAPIURL with a one-shot stderr
+// warning, which preserves CLI behavior on the happy path while
+// closing the SSRF / argv-injection vector when the on-disk config
+// has been tampered with.
 func (m *Manager) GetAPIURL() (string, error) {
 	config, err := m.Load()
 	if err != nil {
@@ -179,6 +225,13 @@ func (m *Manager) GetAPIURL() (string, error) {
 	}
 
 	if config.APIURL == "" {
+		return DefaultAPIURL, nil
+	}
+
+	if err := validateAPIURL(config.APIURL); err != nil {
+		apiURLWarnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "⚠ ignoring invalid api_url in config (%v); using default %s\n", err, DefaultAPIURL)
+		})
 		return DefaultAPIURL, nil
 	}
 

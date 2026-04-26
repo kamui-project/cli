@@ -49,6 +49,8 @@ manage your projects, deploy apps, and read logs through tool calls.
 
 Quickest path:
   kamui mcp setup --client claude-code --register   # safest: token never hits stdout
+  kamui mcp setup --client cursor --register        # writes ~/.cursor/mcp.json directly
+  kamui mcp setup --client codex --register         # writes ~/.codex/config.toml directly
   kamui mcp setup                                   # issue a PAT and print setup instructions
   kamui mcp config cursor                           # print config snippet for an existing token
   kamui mcp test                                    # check connectivity to the MCP server`,
@@ -92,8 +94,9 @@ your AI client to Kamui MCP. The plaintext token is shown only once.
 
 By default, the token is printed to stdout for piping. To avoid leaking it
 into logs/transcripts, prefer one of:
-  --register             call the client's CLI directly so the token never
-                         touches stdout (currently: --client claude-code only)
+  --register             write the token directly into the target client's
+                         config file so it never touches stdout/stderr or
+                         the process list (claude-code, cursor, or codex)
   --token-file <path>    write the token to a file (mode 0600); stdout stays clean
   --no-print-token       suppress the stdout token entirely
 
@@ -109,7 +112,7 @@ Examples:
 	s.cmd.Flags().StringVar(&s.name, "name", "", "PAT identifier (default: <hostname>-mcp-<timestamp>)")
 	s.cmd.Flags().IntVar(&s.days, "days", 365, "Validity in days (1-365)")
 	s.cmd.Flags().StringVar(&s.client, "client", mcpClientAll, "Target client: claude-code | cursor | codex | all")
-	s.cmd.Flags().BoolVar(&s.register, "register", false, "Register with the client's CLI directly (claude-code only). Token never goes to stdout.")
+	s.cmd.Flags().BoolVar(&s.register, "register", false, "Write the token directly into the client's config file (claude-code, cursor, codex). Token never goes to stdout/stderr.")
 	s.cmd.Flags().StringVar(&s.tokenFile, "token-file", "", "Write the plaintext token to this file (mode 0600). Stdout stays clean.")
 	s.cmd.Flags().BoolVar(&s.noPrintToken, "no-print-token", false, "Do not print the plaintext token to stdout.")
 	s.cmd.Flags().BoolVar(&s.printToken, "print-token", false, "Force printing the token to stdout even when stdout is not a TTY.")
@@ -125,8 +128,8 @@ func (s *McpSetupCommand) Run(cmd *cobra.Command, _ []string) error {
 	if !isValidMCPClient(s.client) {
 		return fmt.Errorf("--client must be one of: claude-code, cursor, codex, all (got %q)", s.client)
 	}
-	if s.register && s.client != mcpClientClaudeCode {
-		return fmt.Errorf("--register currently supports only --client claude-code (got %q)", s.client)
+	if s.register && !isRegisterableMCPClient(s.client) {
+		return fmt.Errorf("--register requires an explicit --client (claude-code, cursor, or codex; got %q)", s.client)
 	}
 	name := s.name
 	if name == "" {
@@ -149,15 +152,17 @@ func (s *McpSetupCommand) Run(cmd *cobra.Command, _ []string) error {
 		apiURL = defaultAPIURL
 	}
 
-	// --register: hand the token to the client CLI directly. Never touches stdout.
+	// --register: write the token directly into the target client's
+	// config file. Never crosses a process boundary, so it can't leak
+	// via argv (ps / /proc/<pid>/cmdline) or via stdout/stderr.
 	if s.register {
-		if err := registerClaudeCode(cmd.Context(), apiURL, plaintext); err != nil {
+		if err := registerMCPClient(cmd.Context(), s.client, apiURL, plaintext); err != nil {
 			return fmt.Errorf("registration failed (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", id, id, err)
 		}
 		if outputFormat == "json" {
-			return printSetupJSON(id, name, s.days, "", apiURL, mcpClientClaudeCode, true)
+			return printSetupJSON(id, name, s.days, "", apiURL, s.client, true)
 		}
-		fmt.Fprintln(os.Stderr, "✓ Personal Access Token created and registered with Claude Code.")
+		fmt.Fprintf(os.Stderr, "✓ Personal Access Token created and registered with %s.\n", mcpClientDisplayName(s.client))
 		fmt.Fprintf(os.Stderr, "  ID:      %s\n", id)
 		fmt.Fprintf(os.Stderr, "  Name:    %s\n", name)
 		fmt.Fprintf(os.Stderr, "  Expires: %d days\n", s.days)
@@ -337,6 +342,11 @@ func (t *McpTestCommand) Run(cmd *cobra.Command, _ []string) error {
 func (t *McpTestCommand) resolveToken() (string, error) {
 	switch {
 	case t.token != "":
+		// --token leaks via the process list (ps / /proc/<pid>/cmdline)
+		// to other local users. We can't rewrite the user's argv, but
+		// we can flag the safer alternatives at the moment of use so a
+		// CI run or shoulder-surfed terminal session catches it.
+		fmt.Fprintln(os.Stderr, "⚠ --token leaks via the process list. Prefer --token-from-env or --token-file.")
 		return t.token, nil
 	case t.tokenFromEnv != "":
 		v := os.Getenv(t.tokenFromEnv)
@@ -366,6 +376,33 @@ func isValidMCPClient(c string) bool {
 		return true
 	}
 	return false
+}
+
+// isRegisterableMCPClient reports whether --register can target this
+// client. "all" is excluded because each client has a different config
+// file path and error surface; bundling them under a single flag would
+// hide partial-failure modes from the user.
+func isRegisterableMCPClient(c string) bool {
+	switch c {
+	case mcpClientClaudeCode, mcpClientCursor, mcpClientCodex:
+		return true
+	}
+	return false
+}
+
+// mcpClientDisplayName returns the human-readable label used in the
+// success message after --register, so the line matches what the user
+// typed for --client.
+func mcpClientDisplayName(c string) string {
+	switch c {
+	case mcpClientClaudeCode:
+		return "Claude Code"
+	case mcpClientCursor:
+		return "Cursor"
+	case mcpClientCodex:
+		return "Codex"
+	}
+	return c
 }
 
 // defaultPATName returns "<hostname>-mcp-YYYYMMDDHHMMSS" so repeated runs
@@ -405,27 +442,41 @@ func shouldPrintTokenToStdout(noPrint, force bool) bool {
 	return isStdoutTTY()
 }
 
-// writeTokenFile writes the token to path with mode 0600. Parent directories
-// are created if needed (also mode 0700).
+// maxTokenFileSize bounds reads of --token-file inputs. PATs are short
+// (typically <100 bytes); 4 KiB leaves comfortable headroom for any
+// trailing whitespace or future format changes while preventing the CLI
+// from slurping a multi-megabyte file the user pointed at by mistake.
+const maxTokenFileSize = 4 * 1024
+
+// writeTokenFile writes the token to path with mode 0o600. Parent
+// directories are created at 0o700 if needed. The write goes through
+// atomicWrite0600 so a symlink at the destination is refused (was a
+// symlink-hijack vector against arbitrary user files), and partial
+// writes can't leave a half-populated token on disk.
 func writeTokenFile(path, token string) error {
-	if dir := dirOf(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	// Use O_EXCL? No — overwriting is the expected behavior when re-running setup.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(token + "\n"); err != nil {
-		return err
-	}
-	return nil
+	return atomicWrite0600(path, []byte(token+"\n"))
 }
 
+// readTokenFile reads a token from path. Permissive file modes draw a
+// stderr warning (the file is supposed to be 0600 — anything readable
+// by group/other suggests the user copied a token into a shared spot),
+// but read still proceeds: blocking would change observable CLI
+// behavior, and the warning is enough to flag the misconfiguration.
 func readTokenFile(path string) (string, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token file %s: %w", path, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("token file %s is a symlink; refusing to follow", path)
+	}
+	if fi.Size() > maxTokenFileSize {
+		return "", fmt.Errorf("token file %s is %d bytes; refusing to read more than %d", path, fi.Size(), maxTokenFileSize)
+	}
+	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+		fmt.Fprintf(os.Stderr, "⚠ token file %s is readable by other users (mode %#o); chmod 600 recommended\n", path, perm)
+	}
+
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read token file %s: %w", path, err)
@@ -437,38 +488,62 @@ func readTokenFile(path string) (string, error) {
 	return v, nil
 }
 
-func dirOf(path string) string {
-	idx := strings.LastIndexAny(path, "/\\")
-	if idx <= 0 {
-		return ""
-	}
-	return path[:idx]
-}
-
-// registerClaudeCode runs `claude mcp add` to register the Kamui MCP server
-// with the local Claude Code CLI. The token is passed via argv to the child
-// process; it never touches the parent's stdout/stderr.
-func registerClaudeCode(ctx context.Context, apiURL, token string) error {
-	if _, err := exec.LookPath("claude"); err != nil {
-		return fmt.Errorf("'claude' CLI not found in PATH — install Claude Code first (https://claude.com/claude-code)")
-	}
+// registerMCPClient writes the Kamui MCP server entry directly into the
+// target client's user-scope config file, completely avoiding the argv
+// channel that previously leaked the bearer token. Each client uses its
+// own config format and location:
+//
+//   - claude-code: ~/.claude.json (JSON, mcpServers.<name>)
+//   - cursor:      ~/.cursor/mcp.json (JSON, identical schema to claude)
+//   - codex:       ~/.codex/config.toml (TOML, mcp_servers.<name>)
+//
+// For claude-code we keep the historical exec.LookPath check so users
+// without Claude Code installed get the same friendly error they got
+// before. For cursor/codex no such pre-check existed, and their CLIs
+// aren't strictly required (the editors read the config on next start),
+// so we skip the LookPath gate to avoid false negatives on installs
+// where only the GUI app is present.
+func registerMCPClient(_ context.Context, client, apiURL, token string) error {
+	headers := map[string]string{"Authorization": "Bearer " + token}
 	mcpURL := apiURL + "/mcp"
-	args := []string{
-		"mcp", "add",
-		"--transport", "http",
-		"kamui",
-		mcpURL,
-		"--header", "Authorization: Bearer " + token,
+
+	switch client {
+	case mcpClientClaudeCode:
+		if _, err := exec.LookPath("claude"); err != nil {
+			return fmt.Errorf("'claude' CLI not found in PATH — install Claude Code first (https://claude.com/claude-code)")
+		}
+		path, err := LocateClaudeConfig()
+		if err != nil {
+			return fmt.Errorf("locate claude config: %w", err)
+		}
+		entry := MCPHTTPEntry{Type: "http", URL: mcpURL, Headers: headers}
+		if err := RegisterMCPServer(path, "kamui", entry); err != nil {
+			return fmt.Errorf("update %s: %w", path, err)
+		}
+		return nil
+
+	case mcpClientCursor:
+		path, err := LocateCursorConfig()
+		if err != nil {
+			return fmt.Errorf("locate cursor config: %w", err)
+		}
+		entry := MCPHTTPEntry{Type: "http", URL: mcpURL, Headers: headers}
+		if err := RegisterMCPServer(path, "kamui", entry); err != nil {
+			return fmt.Errorf("update %s: %w", path, err)
+		}
+		return nil
+
+	case mcpClientCodex:
+		path, err := LocateCodexConfig()
+		if err != nil {
+			return fmt.Errorf("locate codex config: %w", err)
+		}
+		if err := RegisterCodexMCPServer(path, "kamui", mcpURL, headers); err != nil {
+			return fmt.Errorf("update %s: %w", path, err)
+		}
+		return nil
 	}
-	c := exec.CommandContext(ctx, "claude", args...)
-	// Forward stderr so the user can see registration warnings, but DO NOT
-	// connect stdout to anything that could capture the token.
-	c.Stdout = nil
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("'claude mcp add' exited with error: %w", err)
-	}
-	return nil
+	return fmt.Errorf("--register does not support client %q", client)
 }
 
 // printPATCreated prints the token-creation header to stderr.
