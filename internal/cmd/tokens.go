@@ -59,8 +59,11 @@ type TokensCreateCommand struct {
 	parent *TokensCommand
 	cmd    *cobra.Command
 
-	name string
-	days int
+	name         string
+	days         int
+	tokenFile    string
+	noPrintToken bool
+	printToken   bool
 }
 
 func NewTokensCreateCommand(parent *TokensCommand) *TokensCreateCommand {
@@ -73,13 +76,25 @@ func NewTokensCreateCommand(parent *TokensCommand) *TokensCreateCommand {
 ⚠️  The token is shown only here. Save it now (e.g. pipe to a clipboard tool
 or redirect to a file with chmod 600). It cannot be retrieved later.
 
+Stdout safety:
+  --token-file <path>   write token to a file (mode 0600); stdout stays clean
+  --no-print-token      suppress the stdout token entirely
+  -o json               return {"id","name","token","expires_at",...}
+
+When stdout is not a terminal (pipe, redirect, AI harness), the token is
+withheld from stdout by default. Pass --print-token to override.
+
 Examples:
   kamui tokens create --name "ci"
-  kamui tokens create --name "claude-code" --days 90`,
+  kamui tokens create --name "claude-code" --days 90 --token-file ~/.kamui/pat
+  kamui tokens create --name "ci" -o json`,
 		RunE: c.Run,
 	}
 	c.cmd.Flags().StringVar(&c.name, "name", "", "Token identifier (required, max 50 chars)")
 	c.cmd.Flags().IntVar(&c.days, "days", 30, "Validity in days (1-365)")
+	c.cmd.Flags().StringVar(&c.tokenFile, "token-file", "", "Write the plaintext token to this file (mode 0600). Stdout stays clean.")
+	c.cmd.Flags().BoolVar(&c.noPrintToken, "no-print-token", false, "Do not print the plaintext token to stdout.")
+	c.cmd.Flags().BoolVar(&c.printToken, "print-token", false, "Force printing the token to stdout even when stdout is not a TTY.")
 	_ = c.cmd.MarkFlagRequired("name")
 	return c
 }
@@ -94,6 +109,8 @@ func (c *TokensCreateCommand) Run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--name must be 1-50 characters (got %d)", len(c.name))
 	}
 
+	outputFormat := resolveOutputFormat(cmd)
+
 	tokens := c.parent.Root().Container().TokensService()
 	plaintext, id, err := tokens.Create(cmd.Context(), c.name, c.days)
 	if err != nil {
@@ -101,11 +118,38 @@ func (c *TokensCreateCommand) Run(cmd *cobra.Command, _ []string) error {
 	}
 
 	apiURL, _ := c.parent.Root().Container().ConfigManager().GetAPIURL()
+	if apiURL == "" {
+		apiURL = defaultAPIURL
+	}
+
+	if c.tokenFile != "" {
+		if err := writeTokenFile(c.tokenFile, plaintext); err != nil {
+			return fmt.Errorf("failed to write token file (token id %s — revoke with 'kamui tokens delete %s --yes' if unused): %w", id, id, err)
+		}
+		if outputFormat == "json" {
+			return printSetupJSON(id, c.name, c.days, "", apiURL, "", false)
+		}
+		printPATCreated(id, c.name, c.days)
+		fmt.Fprintf(os.Stderr, "  Token written to %s (mode 0600).\n", c.tokenFile)
+		printRevokeHint(os.Stderr, id)
+		return nil
+	}
+
+	if outputFormat == "json" {
+		return printSetupJSON(id, c.name, c.days, plaintext, apiURL, "", false)
+	}
+
 	printPATCreated(id, c.name, c.days)
 	printMCPSetupInstructions(apiURL, plaintext, mcpClientAll)
+	printRevokeHint(os.Stderr, id)
 
-	// Plaintext goes to stdout so you can pipe / redirect cleanly.
-	fmt.Println(plaintext)
+	if shouldPrintTokenToStdout(c.noPrintToken, c.printToken) {
+		fmt.Println(plaintext)
+	} else if !isStdoutTTY() && !c.noPrintToken {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "ℹ️  stdout is not a terminal — token withheld from stdout to avoid leaking into logs.")
+		fmt.Fprintln(os.Stderr, "   Use --print-token to force, --token-file to capture, or -o json for structured output.")
+	}
 	return nil
 }
 
@@ -172,9 +216,9 @@ func (l *TokensListCommand) outputTable(pats []iface.PATInfo) error {
 		if p.LastUsedAt != nil {
 			lastUsed = *p.LastUsedAt
 		}
-		rows = append(rows, []string{p.ID, p.Name, p.ExpiresAt, lastUsed})
+		rows = append(rows, []string{p.ID, p.Name, p.CreatedAt, p.ExpiresAt, lastUsed})
 	}
-	printTable(os.Stdout, "", []string{"ID", "NAME", "EXPIRES", "LAST USED"}, rows)
+	printTable(os.Stdout, "", []string{"ID", "NAME", "CREATED", "EXPIRES", "LAST USED"}, rows)
 	return nil
 }
 
@@ -212,6 +256,9 @@ func (d *TokensDeleteCommand) Run(cmd *cobra.Command, args []string) error {
 	tokens := d.parent.Root().Container().TokensService()
 
 	if !d.yes {
+		if !isStdinTTY() {
+			return fmt.Errorf("refusing to prompt: stdin is not a terminal; pass --yes for non-interactive deletion")
+		}
 		// Look up the name for the confirmation prompt.
 		// Include OAuth session tokens so the user gets an explicit warning
 		// if they're about to delete their own active CLI session.
