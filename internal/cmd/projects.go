@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/AlecAivazis/survey/v2"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
@@ -137,24 +136,19 @@ func (l *ProjectsListCommand) outputTable(projects []iface.Project) error {
 		return nil
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tPLAN\tREGION\tAPPS\tDATABASES")
-	fmt.Fprintln(w, "--\t----\t----\t------\t----\t---------")
-
+	rows := make([][]string, 0, len(projects))
 	for _, p := range projects {
-		appCount := len(p.Apps)
-		dbCount := len(p.Databases)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n",
+		rows = append(rows, []string{
 			p.ID,
 			p.Name,
 			p.PlanType,
 			p.Region,
-			appCount,
-			dbCount,
-		)
+			fmt.Sprintf("%d", len(p.Apps)),
+			fmt.Sprintf("%d", len(p.Databases)),
+		})
 	}
-
-	return w.Flush()
+	printTable(os.Stdout, "", []string{"ID", "NAME", "PLAN", "REGION", "APPS", "DATABASES"}, rows)
+	return nil
 }
 
 // ProjectsGetCommand represents the projects get command
@@ -245,22 +239,15 @@ func (g *ProjectsGetCommand) outputDetail(project *iface.Project) error {
 	if len(project.Apps) == 0 {
 		fmt.Println("  No apps")
 	} else {
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  ID\tNAME\tTYPE\tURL")
-		fmt.Fprintln(w, "  --\t----\t----\t---")
+		rows := make([][]string, 0, len(project.Apps))
 		for _, app := range project.Apps {
 			url := app.URL
 			if url == "" {
 				url = "-"
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
-				app.ID,
-				app.Name,
-				app.AppType,
-				url,
-			)
+			rows = append(rows, []string{app.ID, app.Name, app.AppType, url})
 		}
-		w.Flush()
+		printTable(os.Stdout, "  ", []string{"ID", "NAME", "TYPE", "URL"}, rows)
 	}
 
 	// Databases section
@@ -268,18 +255,11 @@ func (g *ProjectsGetCommand) outputDetail(project *iface.Project) error {
 	if len(project.Databases) == 0 {
 		fmt.Println("  No databases")
 	} else {
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  ID\tNAME\tTYPE\tSTATUS")
-		fmt.Fprintln(w, "  --\t----\t----\t------")
+		rows := make([][]string, 0, len(project.Databases))
 		for _, db := range project.Databases {
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
-				db.ID,
-				db.Name,
-				db.SpecType,
-				db.Status,
-			)
+			rows = append(rows, []string{db.ID, db.Name, db.SpecType, db.Status})
 		}
-		w.Flush()
+		printTable(os.Stdout, "  ", []string{"ID", "NAME", "TYPE", "STATUS"}, rows)
 	}
 
 	return nil
