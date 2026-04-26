@@ -26,6 +26,7 @@ type RootCommand struct {
 	projectsCmd *ProjectsCommand
 	appsCmd     *AppsCommand
 	tokensCmd   *TokensCommand
+	mcpCmd      *McpCommand
 }
 
 // NewRootCommand creates a new root command
@@ -58,6 +59,7 @@ To get started, run:
 	r.projectsCmd = NewProjectsCommand(r)
 	r.appsCmd = NewAppsCommand(r)
 	r.tokensCmd = NewTokensCommand(r)
+	r.mcpCmd = NewMcpCommand(r)
 
 	// Add subcommands
 	r.cmd.AddCommand(r.loginCmd.Command())
@@ -65,6 +67,7 @@ To get started, run:
 	r.cmd.AddCommand(r.projectsCmd.Command())
 	r.cmd.AddCommand(r.appsCmd.Command())
 	r.cmd.AddCommand(r.tokensCmd.Command())
+	r.cmd.AddCommand(r.mcpCmd.Command())
 
 	return r
 }

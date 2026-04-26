@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
@@ -101,13 +100,10 @@ func (c *TokensCreateCommand) Run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	fmt.Fprintln(os.Stderr, "✓ Personal Access Token created.")
-	fmt.Fprintf(os.Stderr, "  ID:      %s\n", id)
-	fmt.Fprintf(os.Stderr, "  Name:    %s\n", c.name)
-	fmt.Fprintf(os.Stderr, "  Expires: %s\n", time.Now().UTC().AddDate(0, 0, c.days).Format("2006-01-02"))
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "⚠️  TOKEN (shown only once — save it now):")
-	fmt.Fprintln(os.Stderr, "")
+	apiURL, _ := c.parent.Root().Container().ConfigManager().GetAPIURL()
+	printPATCreated(id, c.name, c.days)
+	printMCPSetupInstructions(apiURL, plaintext, mcpClientAll)
+
 	// Plaintext goes to stdout so you can pipe / redirect cleanly.
 	fmt.Println(plaintext)
 	return nil
