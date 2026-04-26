@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kamui-project/kamui-cli/internal/auth"
@@ -133,7 +134,15 @@ func (s *authService) EnsureAuthenticated(ctx context.Context) error {
 
 	result, err := oauthFlow.RefreshTokens(ctx, cfg.RefreshToken)
 	if err != nil {
-		return fmt.Errorf("failed to refresh token: %w. Please run 'kamui login' again", err)
+		if errors.Is(err, auth.ErrRefreshTokenInvalid) {
+			// Refresh token was rejected by the server: drop local tokens
+			// so the user can simply run `kamui login` again.
+			if clearErr := s.configManager.Clear(); clearErr != nil {
+				return fmt.Errorf("session expired and failed to clear local credentials: %w", clearErr)
+			}
+			return fmt.Errorf("session expired. Please run 'kamui login' again")
+		}
+		return fmt.Errorf("failed to refresh token: %w", err)
 	}
 
 	// Save new tokens

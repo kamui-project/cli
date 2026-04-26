@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,10 @@ import (
 
 	"github.com/pkg/browser"
 )
+
+// ErrRefreshTokenInvalid is returned when the refresh token has been rejected
+// by the authorization server (4xx). The caller should clear stored tokens.
+var ErrRefreshTokenInvalid = errors.New("refresh token invalid or revoked")
 
 const (
 	// DefaultCallbackPort is the default port for the local OAuth callback server
@@ -230,6 +235,9 @@ func (o *OAuthFlow) RefreshTokens(ctx context.Context, refreshToken string) (*OA
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, fmt.Errorf("%w (status %d)", ErrRefreshTokenInvalid, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("token refresh failed with status %d", resp.StatusCode)
 	}
 
