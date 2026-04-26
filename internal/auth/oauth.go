@@ -256,6 +256,48 @@ func (o *OAuthFlow) RefreshTokens(ctx context.Context, refreshToken string) (*OA
 	}, nil
 }
 
+// Revoke implements RFC 7009 token revocation. tokenTypeHint is one of
+// "access_token" | "refresh_token" | "" (unknown). Per RFC 7009 §2.2, the
+// server returns 200 OK regardless of whether the token actually existed; we
+// only surface client-auth (401) and request (4xx) errors as failures.
+func (o *OAuthFlow) Revoke(ctx context.Context, token, tokenTypeHint string) error {
+	if token == "" {
+		return nil
+	}
+	revokeURL := o.apiURL + "/oauth/revoke"
+
+	data := url.Values{}
+	data.Set("token", token)
+	if tokenTypeHint != "" {
+		data.Set("token_type_hint", tokenTypeHint)
+	}
+	data.Set("client_id", o.clientID)
+	if o.clientSecret != "" {
+		data.Set("client_secret", o.clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, revokeURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("failed to create revoke request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("revoke request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// RFC 7009: 200 = success (even if token didn't exist).
+	// 401 = client auth failed. 400 = malformed request.
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("revoke failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // findAvailablePort finds an available port starting from the default
 func (o *OAuthFlow) findAvailablePort() (int, error) {
 	for port := o.callbackPort; port < o.callbackPort+10; port++ {

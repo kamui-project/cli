@@ -62,9 +62,10 @@ func (s *authService) Login(ctx context.Context) error {
 	return nil
 }
 
-// Logout clears stored credentials
+// Logout revokes server-side tokens (RFC 7009) then clears local credentials.
+// Server-side revoke is best-effort: if the network or server is unavailable,
+// local credentials are still cleared (logout MUST work offline).
 func (s *authService) Logout(ctx context.Context) error {
-	// Check if we have any tokens (even expired ones)
 	cfg, err := s.configManager.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -72,6 +73,26 @@ func (s *authService) Logout(ctx context.Context) error {
 
 	if cfg.AccessToken == "" && cfg.RefreshToken == "" {
 		return fmt.Errorf("not logged in")
+	}
+
+	// Best-effort server-side revocation. We need client credentials to
+	// authenticate the revoke call; if they're missing (e.g. partially
+	// corrupted config) just skip and clear local state.
+	if cfg.ClientID != "" && cfg.ClientSecret != "" {
+		oauthFlow := auth.NewOAuthFlow(cfg.APIURL)
+		oauthFlow.SetClientCredentials(cfg.ClientID, cfg.ClientSecret)
+
+		if cfg.AccessToken != "" {
+			if err := oauthFlow.Revoke(ctx, cfg.AccessToken, "access_token"); err != nil {
+				// Don't abort logout; just inform the user.
+				fmt.Printf("Warning: server-side access token revoke failed (%v). Local credentials will still be cleared.\n", err)
+			}
+		}
+		if cfg.RefreshToken != "" {
+			if err := oauthFlow.Revoke(ctx, cfg.RefreshToken, "refresh_token"); err != nil {
+				fmt.Printf("Warning: server-side refresh token revoke failed (%v). Local credentials will still be cleared.\n", err)
+			}
+		}
 	}
 
 	if err := s.configManager.Clear(); err != nil {
