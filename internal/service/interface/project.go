@@ -36,12 +36,13 @@ type App struct {
 	AppType     string         `json:"app_type"`
 }
 
-// Database represents a Kamui database
+// Database represents a Kamui database. JSON tags match the dashboard API
+// response shape (`db_name`, `db_spec_type`, `database_status`).
 type Database struct {
 	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	SpecType string `json:"spec_type"`
+	Name     string `json:"db_name"`
+	Status   string `json:"database_status"`
+	SpecType string `json:"db_spec_type"`
 }
 
 // CreateProjectInput represents the input for creating a project

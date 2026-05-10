@@ -4,13 +4,45 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 
+	"github.com/kamui-project/kamui-cli/internal/cloudflared"
 	"github.com/kamui-project/kamui-cli/internal/cmd"
+	"github.com/kamui-project/kamui-cli/internal/daemon"
 )
 
 func main() {
+	// Daemon re-exec path: when `kamui db daemon start` re-launches us with
+	// KAMUI_DB_DAEMON=1, hand control to the daemon Runner instead of cobra.
+	if os.Getenv("KAMUI_DB_DAEMON") == "1" {
+		os.Exit(runDaemon())
+	}
+
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// runDaemon is invoked when this binary is re-exec'd by `db daemon start`.
+// It reads tunnel config from env vars and runs the long-lived loop.
+func runDaemon() int {
+	tunnelsJSON := os.Getenv("KAMUI_DB_DAEMON_TUNNELS")
+	clientID := os.Getenv("KAMUI_DB_DAEMON_CF_CLIENT_ID")
+	clientSecret := os.Getenv("KAMUI_DB_DAEMON_CF_CLIENT_SECRET")
+
+	var tunnels []daemon.Tunnel
+	if err := json.Unmarshal([]byte(tunnelsJSON), &tunnels); err != nil {
+		fmt.Fprintf(os.Stderr, "[daemon] invalid KAMUI_DB_DAEMON_TUNNELS: %v\n", err)
+		return 2
+	}
+
+	mgr := cloudflared.New()
+	if err := daemon.Run(context.Background(), tunnels, clientID, clientSecret, mgr.BuildSpawnCmd); err != nil {
+		fmt.Fprintf(os.Stderr, "[daemon] exit error: %v\n", err)
+		return 1
+	}
+	return 0
 }

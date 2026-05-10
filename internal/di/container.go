@@ -11,11 +11,12 @@ import (
 // Container holds all service dependencies for the CLI.
 // Services are accessed via interfaces to enable mocking in tests.
 type Container struct {
-	configManager  *config.Manager
-	authService    iface.AuthService
-	projectService iface.ProjectService
-	appService     iface.AppService
-	tokensService  iface.TokensService
+	configManager   *config.Manager
+	authService     iface.AuthService
+	projectService  iface.ProjectService
+	appService      iface.AppService
+	tokensService   iface.TokensService
+	databaseService iface.DatabaseService
 }
 
 // NewContainer creates a new dependency container with default implementations
@@ -26,12 +27,14 @@ func NewContainer() (*Container, error) {
 	}
 
 	authService := service.NewAuthService(configManager)
+	projectService := service.NewProjectService(configManager, authService)
 	return &Container{
-		configManager:  configManager,
-		authService:    authService,
-		projectService: service.NewProjectService(configManager, authService),
-		appService:     service.NewAppService(configManager, authService),
-		tokensService:  service.NewTokensService(configManager, authService),
+		configManager:   configManager,
+		authService:     authService,
+		projectService:  projectService,
+		appService:      service.NewAppService(configManager, authService),
+		tokensService:   service.NewTokensService(configManager, authService),
+		databaseService: service.NewDatabaseService(configManager, authService, projectService),
 	}, nil
 }
 
@@ -79,6 +82,11 @@ func (c *Container) AppService() iface.AppService {
 // TokensService returns the personal access token service
 func (c *Container) TokensService() iface.TokensService {
 	return c.tokensService
+}
+
+// DatabaseService returns the database (external connection) service
+func (c *Container) DatabaseService() iface.DatabaseService {
+	return c.databaseService
 }
 
 // ConfigManager returns the config manager

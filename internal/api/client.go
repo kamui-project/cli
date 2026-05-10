@@ -478,3 +478,58 @@ func (c *Client) ListPATs(ctx context.Context, includeOAuth bool) ([]PATInfo, er
 func (c *Client) DeletePAT(ctx context.Context, id string) error {
 	return c.Delete(ctx, "/api/tokens/"+id, nil)
 }
+
+// CliServiceToken is the Cloudflare Access Service Token used by the CLI to
+// pass through CF Edge before reaching the Aurora tunnel.
+type CliServiceToken struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Hostname     string `json:"hostname"`
+}
+
+// DatabaseExternalConnection is the connection info clients use to reach a
+// database via the Cloudflare Tunnel + Access path. Password is the plaintext
+// of the `_external` PostgreSQL role (decrypted from dashboard-backend's store).
+type DatabaseExternalConnection struct {
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Database   string `json:"database"`
+	User       string `json:"user"`
+	Password   string `json:"password"`
+	RemoteHost string `json:"remote_host,omitempty"`
+}
+
+// GetCliServiceToken fetches the platform-shared CF Access service token. The
+// CLI uses these credentials in `cloudflared access tcp` to authenticate to
+// Cloudflare Access. Requires PAT/OAuth bearer authentication.
+func (c *Client) GetCliServiceToken(ctx context.Context) (*CliServiceToken, error) {
+	var token CliServiceToken
+	if err := c.Get(ctx, "/api/cli/service-token", &token); err != nil {
+		return nil, err
+	}
+	return &token, nil
+}
+
+// GetDatabaseExternalConnection fetches the external-access connection info
+// (decrypted password) for the given database UUID. Returns 409 if the
+// database has no encrypted password yet (created before Phase 3) — caller
+// should suggest the user press the "regenerate" button in the dashboard.
+func (c *Client) GetDatabaseExternalConnection(ctx context.Context, databaseID string) (*DatabaseExternalConnection, error) {
+	path := fmt.Sprintf("/api/database/%s/external-connection", databaseID)
+	var conn DatabaseExternalConnection
+	if err := c.Get(ctx, path, &conn); err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+// RegenerateDatabasePassword rotates the external-access password and returns
+// the new connection info (with the new plaintext password).
+func (c *Client) RegenerateDatabasePassword(ctx context.Context, databaseID string) (*DatabaseExternalConnection, error) {
+	path := fmt.Sprintf("/api/database/%s/regenerate-password", databaseID)
+	var conn DatabaseExternalConnection
+	if err := c.Post(ctx, path, nil, &conn); err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
