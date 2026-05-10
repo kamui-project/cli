@@ -119,6 +119,7 @@ func (s *appService) CreateApp(ctx context.Context, input *iface.CreateAppInput)
 		RepositoryBranch:    input.Branch,
 		Directory:           input.Directory,
 		DatabaseID:          input.DatabaseID,
+		AppSpecType:         input.AppSpecType,
 		Status: &api.ProjectStatus{
 			StatusRunning: 0,
 			StatusStopped: 0,
@@ -136,6 +137,9 @@ func (s *appService) CreateApp(ctx context.Context, input *iface.CreateAppInput)
 	}
 	if req.HealthCheckEndpoint == "" {
 		req.HealthCheckEndpoint = "/health"
+	}
+	if req.AppSpecType == "" {
+		req.AppSpecType = "nano"
 	}
 
 	resp, err := client.CreateApp(ctx, req)
@@ -281,4 +285,3 @@ func (s *appService) CreateStaticAppUpload(ctx context.Context, input *iface.Cre
 		Name: input.AppName,
 	}, nil
 }
-

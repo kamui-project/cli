@@ -66,6 +66,25 @@ func (a *AppsCommand) Root() *RootCommand {
 type AppsCreateCommand struct {
 	parent *AppsCommand
 	cmd    *cobra.Command
+
+	name                string
+	appType             string
+	language            string
+	deployType          string
+	owner               string
+	ownerType           string
+	repo                string
+	branch              string
+	directory           string
+	startCommand        string
+	setupCommand        string
+	preCommand          string
+	healthCheckEndpoint string
+	replicas            int
+	appSpecType         string
+	databaseID          string
+	envVars             []string
+	nonInteractive      bool
 }
 
 // NewAppsCreateCommand creates a new apps create command
@@ -93,6 +112,24 @@ Examples:
 	}
 
 	c.cmd.Flags().StringP("project", "p", "", "Project name or ID")
+	c.cmd.Flags().StringVar(&c.name, "name", "", "App name")
+	c.cmd.Flags().StringVar(&c.appType, "type", "", "App type: dynamic")
+	c.cmd.Flags().StringVar(&c.language, "language", "", "Language type: node, go, python")
+	c.cmd.Flags().StringVar(&c.deployType, "deploy-type", "", "Deploy type: github or docker_hub")
+	c.cmd.Flags().StringVar(&c.owner, "owner", "", "GitHub organization/user name")
+	c.cmd.Flags().StringVar(&c.ownerType, "owner-type", "", "GitHub owner type: Organization or User")
+	c.cmd.Flags().StringVar(&c.repo, "repo", "", "GitHub repository name")
+	c.cmd.Flags().StringVar(&c.branch, "branch", "", "GitHub repository branch")
+	c.cmd.Flags().StringVar(&c.directory, "directory", "", "Repository subdirectory")
+	c.cmd.Flags().StringVar(&c.startCommand, "start-command", "", "Application start command")
+	c.cmd.Flags().StringVar(&c.setupCommand, "setup-command", "", "Build/setup command")
+	c.cmd.Flags().StringVar(&c.preCommand, "pre-command", "", "Pre-deploy command")
+	c.cmd.Flags().StringVar(&c.healthCheckEndpoint, "health-check", "", "Health check endpoint")
+	c.cmd.Flags().IntVar(&c.replicas, "replicas", 0, "Replica count")
+	c.cmd.Flags().StringVar(&c.appSpecType, "app-spec", "", "App spec type: nano, small, medium, large")
+	c.cmd.Flags().StringVar(&c.databaseID, "database-id", "", "Database ID to attach")
+	c.cmd.Flags().StringArrayVar(&c.envVars, "env", nil, "Environment variable KEY=VALUE (repeatable)")
+	c.cmd.Flags().BoolVar(&c.nonInteractive, "non-interactive", false, "Fail instead of prompting when required flags are missing")
 
 	return c
 }
@@ -123,6 +160,25 @@ func (c *AppsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	var project iface.Project
 
 	projectFlag, _ := cmd.Flags().GetString("project")
+	if c.hasCreateFlags() || c.nonInteractive {
+		if projectFlag == "" {
+			return fmt.Errorf("--project is required in non-interactive app creation")
+		}
+		// Find project by name or ID
+		var found bool
+		for _, p := range projects {
+			if p.ID == projectFlag || p.Name == projectFlag {
+				project = p
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("project not found: %s\n\nUse 'kamui projects list' to see available projects", projectFlag)
+		}
+		return c.createDynamicAppWithFlags(cmd, project, appService)
+	}
+
 	if projectFlag != "" {
 		// Find project by name or ID
 		var found bool
@@ -177,6 +233,146 @@ func (c *AppsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	default:
 		return c.createDynamicApp(cmd, project, appService)
 	}
+}
+
+func (c *AppsCreateCommand) hasCreateFlags() bool {
+	return c.name != "" ||
+		c.appType != "" ||
+		c.language != "" ||
+		c.deployType != "" ||
+		c.owner != "" ||
+		c.ownerType != "" ||
+		c.repo != "" ||
+		c.branch != "" ||
+		c.directory != "" ||
+		c.startCommand != "" ||
+		c.setupCommand != "" ||
+		c.preCommand != "" ||
+		c.healthCheckEndpoint != "" ||
+		c.replicas != 0 ||
+		c.appSpecType != "" ||
+		c.databaseID != "" ||
+		len(c.envVars) > 0
+}
+
+func (c *AppsCreateCommand) createDynamicAppWithFlags(cmd *cobra.Command, project iface.Project, appService iface.AppService) error {
+	ctx := cmd.Context()
+
+	appType := c.appType
+	if appType == "" {
+		appType = "dynamic"
+	}
+	if appType != "dynamic" {
+		return fmt.Errorf("--type currently supports dynamic for non-interactive app creation")
+	}
+	if c.name == "" {
+		return fmt.Errorf("--name is required in non-interactive app creation")
+	}
+	if c.language == "" {
+		return fmt.Errorf("--language is required in non-interactive app creation")
+	}
+	if c.language != "node" && c.language != "go" && c.language != "python" {
+		return fmt.Errorf("--language must be node, go, or python")
+	}
+	if c.startCommand == "" {
+		return fmt.Errorf("--start-command is required in non-interactive app creation")
+	}
+
+	deployType := c.deployType
+	if deployType == "" {
+		deployType = "github"
+	}
+	if deployType != "github" && deployType != "docker_hub" {
+		return fmt.Errorf("--deploy-type must be github or docker_hub")
+	}
+	if deployType == "github" {
+		if c.owner == "" {
+			return fmt.Errorf("--owner is required when --deploy-type=github")
+		}
+		if c.ownerType == "" {
+			return fmt.Errorf("--owner-type is required when --deploy-type=github")
+		}
+		if c.ownerType != "Organization" && c.ownerType != "User" {
+			return fmt.Errorf("--owner-type must be Organization or User")
+		}
+		if c.repo == "" {
+			return fmt.Errorf("--repo is required when --deploy-type=github")
+		}
+	}
+
+	branch := c.branch
+	if branch == "" {
+		branch = "main"
+	}
+	replicas := c.replicas
+	if replicas < 1 {
+		replicas = 1
+	}
+	appSpecType := c.appSpecType
+	if appSpecType == "" {
+		appSpecType = "nano"
+	}
+	switch appSpecType {
+	case "nano", "small", "medium", "large":
+	default:
+		return fmt.Errorf("--app-spec must be nano, small, medium, or large")
+	}
+	healthCheckEndpoint := c.healthCheckEndpoint
+	if healthCheckEndpoint == "" {
+		healthCheckEndpoint = "/health"
+	}
+
+	envVars, err := parseEnvVars(c.envVars)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Using project: %s\n", project.Name)
+	fmt.Println("\nCreating application...")
+
+	input := &iface.CreateAppInput{
+		ProjectID:       project.ID,
+		AppName:         c.name,
+		Language:        c.language,
+		DeployType:      deployType,
+		Owner:           c.owner,
+		OwnerType:       c.ownerType,
+		Repository:      c.repo,
+		Branch:          branch,
+		Directory:       c.directory,
+		StartCommand:    c.startCommand,
+		SetupCommand:    c.setupCommand,
+		PreCommand:      c.preCommand,
+		HealthCheckPath: healthCheckEndpoint,
+		Replicas:        replicas,
+		AppSpecType:     appSpecType,
+		EnvVars:         envVars,
+		DatabaseID:      c.databaseID,
+	}
+
+	result, err := appService.CreateApp(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ App \"%s\" created successfully!\n", result.Name)
+	fmt.Printf("  ID: %s\n", result.ID)
+	fmt.Println("\n  Note: Deployment is in progress. Check status with:")
+	fmt.Printf("  kamui apps list -p %s\n", project.ID)
+
+	return nil
+}
+
+func parseEnvVars(values []string) (map[string]string, error) {
+	envVars := make(map[string]string)
+	for _, value := range values {
+		key, val, ok := strings.Cut(value, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("--env must be in KEY=VALUE format")
+		}
+		envVars[key] = val
+	}
+	return envVars, nil
 }
 
 // createDynamicApp handles the creation of a dynamic app

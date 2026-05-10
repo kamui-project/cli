@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -269,6 +270,12 @@ func (g *ProjectsGetCommand) outputDetail(project *iface.Project) error {
 type ProjectsCreateCommand struct {
 	parent *ProjectsCommand
 	cmd    *cobra.Command
+
+	name           string
+	description    string
+	planType       string
+	region         string
+	nonInteractive bool
 }
 
 // NewProjectsCreateCommand creates a new projects create command
@@ -290,6 +297,12 @@ Examples:
 		RunE: c.Run,
 	}
 
+	c.cmd.Flags().StringVar(&c.name, "name", "", "Project name")
+	c.cmd.Flags().StringVar(&c.description, "description", "", "Project description (optional, max 80 chars)")
+	c.cmd.Flags().StringVar(&c.planType, "plan", "", "Plan type: free or pro")
+	c.cmd.Flags().StringVar(&c.region, "region", "", "Region (currently only tokyo)")
+	c.cmd.Flags().BoolVar(&c.nonInteractive, "non-interactive", false, "Fail instead of prompting when required flags are missing")
+
 	return c
 }
 
@@ -303,6 +316,10 @@ func (c *ProjectsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	projectService := c.parent.Root().Container().ProjectService()
+
+	if c.name != "" || c.nonInteractive {
+		return c.runWithFlags(ctx, projectService)
+	}
 
 	// Step 1: Project name
 	var name string
@@ -362,6 +379,55 @@ func (c *ProjectsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n✓ Project \"%s\" created successfully!\n", name)
+	fmt.Printf("  Plan:   %s\n", planType)
+	fmt.Printf("  Region: %s\n", region)
+	fmt.Println("\nNext steps:")
+	fmt.Printf("  kamui projects list          - View your projects\n")
+	fmt.Printf("  kamui apps create            - Create an app in this project\n")
+
+	return nil
+}
+
+func (c *ProjectsCreateCommand) runWithFlags(ctx context.Context, projectService iface.ProjectService) error {
+	if c.name == "" {
+		return fmt.Errorf("--name is required in non-interactive project creation")
+	}
+
+	description := c.description
+	if len(description) > 80 {
+		description = description[:80]
+	}
+
+	planType := c.planType
+	if planType == "" {
+		planType = "free"
+	}
+	if planType != "free" && planType != "pro" {
+		return fmt.Errorf("--plan must be free or pro")
+	}
+
+	region := c.region
+	if region == "" {
+		region = "tokyo"
+	}
+	if region != "tokyo" {
+		return fmt.Errorf("--region must be tokyo")
+	}
+
+	fmt.Println("\nCreating project...")
+
+	input := &iface.CreateProjectInput{
+		Name:        c.name,
+		Description: description,
+		PlanType:    planType,
+		Region:      region,
+	}
+
+	if err := projectService.CreateProject(ctx, input); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ Project \"%s\" created successfully!\n", c.name)
 	fmt.Printf("  Plan:   %s\n", planType)
 	fmt.Printf("  Region: %s\n", region)
 	fmt.Println("\nNext steps:")

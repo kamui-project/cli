@@ -20,23 +20,24 @@ type Branch struct {
 
 // CreateAppInput represents the input for creating an app
 type CreateAppInput struct {
-	ProjectID        string
-	AppName          string
-	DisplayName      string
-	Language         string
-	DeployType       string
-	Owner            string
-	OwnerType        string
-	Repository       string
-	Branch           string
-	Directory        string
-	StartCommand     string
-	SetupCommand     string
-	PreCommand       string
-	Replicas         int
-	EnvVars          map[string]string
-	HealthCheckPath  string
-	DatabaseID       string
+	ProjectID       string
+	AppName         string
+	DisplayName     string
+	Language        string
+	DeployType      string
+	Owner           string
+	OwnerType       string
+	Repository      string
+	Branch          string
+	Directory       string
+	StartCommand    string
+	SetupCommand    string
+	PreCommand      string
+	Replicas        int
+	AppSpecType     string
+	EnvVars         map[string]string
+	HealthCheckPath string
+	DatabaseID      string
 }
 
 // CreateAppOutput represents the result of creating an app
@@ -130,4 +131,3 @@ type AppService interface {
 	// DeleteApp deletes an app by ID
 	DeleteApp(ctx context.Context, appID string) error
 }
-
