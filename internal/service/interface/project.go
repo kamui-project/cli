@@ -2,6 +2,7 @@ package iface
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -44,6 +45,36 @@ type Database struct {
 	SpecType string `json:"spec_type"`
 }
 
+func (d *Database) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		DBName         string `json:"db_name"`
+		Status         string `json:"status"`
+		DatabaseStatus string `json:"database_status"`
+		SpecType       string `json:"spec_type"`
+		DBSpecType     string `json:"db_spec_type"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	d.ID = raw.ID
+	d.Name = firstNonEmpty(raw.Name, raw.DBName)
+	d.Status = firstNonEmpty(raw.Status, raw.DatabaseStatus)
+	d.SpecType = firstNonEmpty(raw.SpecType, raw.DBSpecType)
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // CreateProjectInput represents the input for creating a project
 type CreateProjectInput struct {
 	Name        string
@@ -66,4 +97,3 @@ type ProjectService interface {
 	// DeleteProject deletes a project by ID
 	DeleteProject(ctx context.Context, id string) error
 }
-
