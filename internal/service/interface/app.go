@@ -73,15 +73,6 @@ type CreateStaticAppInput struct {
 	Directory        string
 }
 
-// CreateStaticAppUploadInput represents the input for creating a static app via file upload
-type CreateStaticAppUploadInput struct {
-	ProjectID   string
-	AppName     string
-	Replicas    int
-	AppSpecType string // nano, small, medium, large
-	FilePath    string // local path to the ZIP file
-}
-
 // UpdateStaticAppInput represents the input for updating a static app via GitHub
 type UpdateStaticAppInput struct {
 	AppID            string
@@ -94,15 +85,6 @@ type UpdateStaticAppInput struct {
 	RepositoryName   string
 	RepositoryBranch string
 	Directory        string
-}
-
-// UpdateStaticAppUploadInput represents the input for updating a static app via file upload
-type UpdateStaticAppUploadInput struct {
-	AppID       string
-	ProjectID   string
-	Replicas    int
-	AppSpecType string
-	FilePath    string
 }
 
 // AppService defines the interface for app operations
@@ -118,9 +100,6 @@ type AppService interface {
 
 	// CreateStaticApp creates a new static app via GitHub repository
 	CreateStaticApp(ctx context.Context, input *CreateStaticAppInput) (*CreateAppOutput, error)
-
-	// CreateStaticAppUpload creates a new static app via file upload
-	CreateStaticAppUpload(ctx context.Context, input *CreateStaticAppUploadInput) (*CreateAppOutput, error)
 
 	// ListApps returns all apps for a project
 	ListApps(ctx context.Context, projectID string) ([]App, error)
