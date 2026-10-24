@@ -129,10 +129,9 @@ kamui projects list -o json
 | `kamui apps create` | Create a new app (dynamic or static) |
 | `kamui apps delete <id>` | Delete an app |
 
-The `apps create` command supports three app types:
+The `apps create` command supports two app types:
 - **Dynamic app** - Server-side applications (Node.js, Go, Python)
 - **Static app (GitHub)** - Static sites from GitHub repository
-- **Static app (ZIP upload)** - Static sites from local ZIP file
 
 ### Global Flags
 

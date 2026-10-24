@@ -1,11 +1,7 @@
 package cmd
 
 import (
-	"archive/zip"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -66,6 +62,25 @@ func (a *AppsCommand) Root() *RootCommand {
 type AppsCreateCommand struct {
 	parent *AppsCommand
 	cmd    *cobra.Command
+
+	name                string
+	appType             string
+	language            string
+	deployType          string
+	owner               string
+	ownerType           string
+	repo                string
+	branch              string
+	directory           string
+	startCommand        string
+	setupCommand        string
+	preCommand          string
+	healthCheckEndpoint string
+	replicas            int
+	appSpecType         string
+	databaseID          string
+	envVars             []string
+	nonInteractive      bool
 }
 
 // NewAppsCreateCommand creates a new apps create command
@@ -93,6 +108,24 @@ Examples:
 	}
 
 	c.cmd.Flags().StringP("project", "p", "", "Project name or ID")
+	c.cmd.Flags().StringVar(&c.name, "name", "", "App name")
+	c.cmd.Flags().StringVar(&c.appType, "type", "", "App type: dynamic")
+	c.cmd.Flags().StringVar(&c.language, "language", "", "Language type: node, go, python")
+	c.cmd.Flags().StringVar(&c.deployType, "deploy-type", "", "Deploy type: github or docker_hub")
+	c.cmd.Flags().StringVar(&c.owner, "owner", "", "GitHub organization/user name")
+	c.cmd.Flags().StringVar(&c.ownerType, "owner-type", "", "GitHub owner type: Organization or User")
+	c.cmd.Flags().StringVar(&c.repo, "repo", "", "GitHub repository name")
+	c.cmd.Flags().StringVar(&c.branch, "branch", "", "GitHub repository branch")
+	c.cmd.Flags().StringVar(&c.directory, "directory", "", "Repository subdirectory")
+	c.cmd.Flags().StringVar(&c.startCommand, "start-command", "", "Application start command")
+	c.cmd.Flags().StringVar(&c.setupCommand, "setup-command", "", "Build/setup command")
+	c.cmd.Flags().StringVar(&c.preCommand, "pre-command", "", "Pre-deploy command")
+	c.cmd.Flags().StringVar(&c.healthCheckEndpoint, "health-check", "", "Health check endpoint")
+	c.cmd.Flags().IntVar(&c.replicas, "replicas", 0, "Replica count")
+	c.cmd.Flags().StringVar(&c.appSpecType, "app-spec", "", "App spec type: nano, small, medium, large")
+	c.cmd.Flags().StringVar(&c.databaseID, "database-id", "", "Database ID to attach")
+	c.cmd.Flags().StringArrayVar(&c.envVars, "env", nil, "Environment variable KEY=VALUE (repeatable)")
+	c.cmd.Flags().BoolVar(&c.nonInteractive, "non-interactive", false, "Fail instead of prompting when required flags are missing")
 
 	return c
 }
@@ -123,6 +156,25 @@ func (c *AppsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	var project iface.Project
 
 	projectFlag, _ := cmd.Flags().GetString("project")
+	if c.hasCreateFlags() || c.nonInteractive {
+		if projectFlag == "" {
+			return fmt.Errorf("--project is required in non-interactive app creation")
+		}
+		// Find project by name or ID
+		var found bool
+		for _, p := range projects {
+			if p.ID == projectFlag || p.Name == projectFlag {
+				project = p
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("project not found: %s\n\nUse 'kamui projects list' to see available projects", projectFlag)
+		}
+		return c.createDynamicAppWithFlags(cmd, project, appService)
+	}
+
 	if projectFlag != "" {
 		// Find project by name or ID
 		var found bool
@@ -159,7 +211,7 @@ func (c *AppsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 2: App type selection
-	appTypes := []string{"Dynamic app", "Static app (GitHub)", "Static app (ZIP upload)"}
+	appTypes := []string{"Dynamic app", "Static app (GitHub)"}
 	var selectedAppType string
 	if err := survey.AskOne(&survey.Select{
 		Message: "App type:",
@@ -172,11 +224,149 @@ func (c *AppsCreateCommand) Run(cmd *cobra.Command, args []string) error {
 	switch selectedAppType {
 	case "Static app (GitHub)":
 		return c.createStaticAppGitHub(cmd, project, appService)
-	case "Static app (ZIP upload)":
-		return c.createStaticAppUpload(cmd, project, appService)
 	default:
 		return c.createDynamicApp(cmd, project, appService)
 	}
+}
+
+func (c *AppsCreateCommand) hasCreateFlags() bool {
+	return c.name != "" ||
+		c.appType != "" ||
+		c.language != "" ||
+		c.deployType != "" ||
+		c.owner != "" ||
+		c.ownerType != "" ||
+		c.repo != "" ||
+		c.branch != "" ||
+		c.directory != "" ||
+		c.startCommand != "" ||
+		c.setupCommand != "" ||
+		c.preCommand != "" ||
+		c.healthCheckEndpoint != "" ||
+		c.replicas != 0 ||
+		c.appSpecType != "" ||
+		c.databaseID != "" ||
+		len(c.envVars) > 0
+}
+
+func (c *AppsCreateCommand) createDynamicAppWithFlags(cmd *cobra.Command, project iface.Project, appService iface.AppService) error {
+	ctx := cmd.Context()
+
+	appType := c.appType
+	if appType == "" {
+		appType = "dynamic"
+	}
+	if appType != "dynamic" {
+		return fmt.Errorf("--type currently supports dynamic for non-interactive app creation")
+	}
+	if c.name == "" {
+		return fmt.Errorf("--name is required in non-interactive app creation")
+	}
+	if c.language == "" {
+		return fmt.Errorf("--language is required in non-interactive app creation")
+	}
+	if c.language != "node" && c.language != "go" && c.language != "python" {
+		return fmt.Errorf("--language must be node, go, or python")
+	}
+	if c.startCommand == "" {
+		return fmt.Errorf("--start-command is required in non-interactive app creation")
+	}
+
+	deployType := c.deployType
+	if deployType == "" {
+		deployType = "github"
+	}
+	if deployType != "github" && deployType != "docker_hub" {
+		return fmt.Errorf("--deploy-type must be github or docker_hub")
+	}
+	if deployType == "github" {
+		if c.owner == "" {
+			return fmt.Errorf("--owner is required when --deploy-type=github")
+		}
+		if c.ownerType == "" {
+			return fmt.Errorf("--owner-type is required when --deploy-type=github")
+		}
+		if c.ownerType != "Organization" && c.ownerType != "User" {
+			return fmt.Errorf("--owner-type must be Organization or User")
+		}
+		if c.repo == "" {
+			return fmt.Errorf("--repo is required when --deploy-type=github")
+		}
+	}
+
+	branch := c.branch
+	if branch == "" {
+		branch = "main"
+	}
+	replicas := c.replicas
+	if replicas < 1 {
+		replicas = 1
+	}
+	appSpecType := c.appSpecType
+	if appSpecType == "" {
+		appSpecType = "nano"
+	}
+	switch appSpecType {
+	case "nano", "small", "medium", "large":
+	default:
+		return fmt.Errorf("--app-spec must be nano, small, medium, or large")
+	}
+	healthCheckEndpoint := c.healthCheckEndpoint
+	if healthCheckEndpoint == "" {
+		healthCheckEndpoint = "/health"
+	}
+
+	envVars, err := parseEnvVars(c.envVars)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Using project: %s\n", project.Name)
+	fmt.Println("\nCreating application...")
+
+	input := &iface.CreateAppInput{
+		ProjectID:       project.ID,
+		AppName:         c.name,
+		Language:        c.language,
+		DeployType:      deployType,
+		Owner:           c.owner,
+		OwnerType:       c.ownerType,
+		Repository:      c.repo,
+		Branch:          branch,
+		Directory:       c.directory,
+		StartCommand:    c.startCommand,
+		SetupCommand:    c.setupCommand,
+		PreCommand:      c.preCommand,
+		HealthCheckPath: healthCheckEndpoint,
+		Replicas:        replicas,
+		AppSpecType:     appSpecType,
+		EnvVars:         envVars,
+		DatabaseID:      c.databaseID,
+	}
+
+	result, err := appService.CreateApp(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✓ App \"%s\" created successfully!\n", result.Name)
+	fmt.Printf("  ID: %s\n", result.ID)
+	fmt.Println("\n  Note: Deployment is in progress. Check status with:")
+	fmt.Printf("  kamui apps list -p %s\n", project.ID)
+
+	return nil
+}
+
+func parseEnvVars(values []string) (map[string]string, error) {
+	envVars := make(map[string]string)
+	for _, value := range values {
+		key, val, ok := strings.Cut(value, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("--env must be in KEY=VALUE format")
+		}
+		envVars[key] = val
+	}
+	return envVars, nil
 }
 
 // createDynamicApp handles the creation of a dynamic app
@@ -617,153 +807,6 @@ func (c *AppsCreateCommand) createStaticAppGitHub(cmd *cobra.Command, project if
 	return nil
 }
 
-// createStaticAppUpload handles the creation of a static app via file upload
-func (c *AppsCreateCommand) createStaticAppUpload(cmd *cobra.Command, project iface.Project, appService iface.AppService) error {
-	ctx := cmd.Context()
-
-	// App name
-	var appName string
-	if err := survey.AskOne(&survey.Input{
-		Message: "App name:",
-	}, &appName, survey.WithValidator(survey.Required)); err != nil {
-		return err
-	}
-
-	// Directory or ZIP file path
-	var inputPath string
-	if err := survey.AskOne(&survey.Input{
-		Message: "Path to directory or ZIP file:",
-	}, &inputPath, survey.WithValidator(func(ans interface{}) error {
-		path := ans.(string)
-		if path == "" {
-			return fmt.Errorf("path is required")
-		}
-		// Expand ~ to home directory
-		if strings.HasPrefix(path, "~/") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				path = home + path[1:]
-			}
-		}
-		// Check if path exists
-		info, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			return fmt.Errorf("path not found: %s", path)
-		}
-
-		if info.IsDir() {
-			// Check if directory contains index.html
-			indexPath := filepath.Join(path, "index.html")
-			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-				return fmt.Errorf("directory must contain index.html")
-			}
-		} else {
-			// Check if it's a ZIP file
-			if !strings.HasSuffix(strings.ToLower(path), ".zip") {
-				return fmt.Errorf("file must be a ZIP archive or a directory")
-			}
-			// Check if ZIP contains index.html
-			if err := validateZipContainsIndexHTML(path); err != nil {
-				return err
-			}
-		}
-		return nil
-	})); err != nil {
-		return err
-	}
-
-	// Expand ~ to home directory for the actual path
-	if strings.HasPrefix(inputPath, "~/") {
-		home, _ := os.UserHomeDir()
-		inputPath = home + inputPath[1:]
-	}
-
-	// Determine if we need to create a ZIP from directory
-	var filePath string
-	var tempZipCreated bool
-	info, _ := os.Stat(inputPath)
-	if info.IsDir() {
-		// Create temporary ZIP from directory
-		fmt.Println("Creating ZIP from directory...")
-		tempZip, err := createZipFromDirectory(inputPath)
-		if err != nil {
-			return fmt.Errorf("failed to create ZIP: %w", err)
-		}
-		filePath = tempZip
-		tempZipCreated = true
-	} else {
-		filePath = inputPath
-	}
-
-	// Clean up temp ZIP after we're done (if created)
-	if tempZipCreated {
-		defer os.Remove(filePath)
-	}
-
-	// App spec type - Free plan is limited to nano
-	var appSpecType string
-	if project.PlanType == "free" {
-		appSpecType = "nano"
-		fmt.Println("App spec: nano (Free plan)")
-	} else {
-		specTypes := []string{"Nano", "Small", "Medium", "Large"}
-		specTypeMap := map[string]string{
-			"Nano":   "nano",
-			"Small":  "small",
-			"Medium": "medium",
-			"Large":  "large",
-		}
-
-		var selectedSpecType string
-		if err := survey.AskOne(&survey.Select{
-			Message: "App spec (resource size):",
-			Options: specTypes,
-			Default: "Nano",
-		}, &selectedSpecType); err != nil {
-			return err
-		}
-		appSpecType = specTypeMap[selectedSpecType]
-	}
-
-	// Replicas
-	var replicasStr string
-	if err := survey.AskOne(&survey.Input{
-		Message: "Replicas:",
-		Default: "1",
-	}, &replicasStr); err != nil {
-		return err
-	}
-
-	var replicas int
-	fmt.Sscanf(replicasStr, "%d", &replicas)
-	if replicas < 1 {
-		replicas = 1
-	}
-
-	// Create the static app via file upload
-	fmt.Println("\nUploading and creating static application...")
-
-	input := &iface.CreateStaticAppUploadInput{
-		ProjectID:   project.ID,
-		AppName:     appName,
-		Replicas:    replicas,
-		AppSpecType: appSpecType,
-		FilePath:    filePath,
-	}
-
-	result, err := appService.CreateStaticAppUpload(ctx, input)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("\n✓ Static app \"%s\" created successfully!\n", result.Name)
-	fmt.Printf("  ID: %s\n", result.ID)
-	fmt.Println("\n  Note: Deployment is in progress. Check status with:")
-	fmt.Printf("  kamui apps list -p %s\n", project.ID)
-
-	return nil
-}
-
 // AppsListCommand represents the apps list command
 type AppsListCommand struct {
 	parent *AppsCommand
@@ -896,116 +939,6 @@ func truncateString(s string, maxLen int) string {
 // Helper to check if a string contains a substring (case-insensitive)
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
-}
-
-// validateZipContainsIndexHTML checks if a ZIP file contains index.html at the root level
-func validateZipContainsIndexHTML(zipPath string) error {
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return fmt.Errorf("failed to open ZIP file: %w", err)
-	}
-	defer reader.Close()
-
-	for _, file := range reader.File {
-		// Get the file name without directory path
-		name := filepath.Base(file.Name)
-		// Check if it's index.html at root level (no directory prefix or first level)
-		dir := filepath.Dir(file.Name)
-		if name == "index.html" && (dir == "." || dir == "") {
-			return nil // Found index.html at root
-		}
-	}
-
-	return fmt.Errorf("ZIP file must contain index.html at the root level")
-}
-
-// createZipFromDirectory creates a temporary ZIP file from a directory
-func createZipFromDirectory(dirPath string) (string, error) {
-	// Create temporary file
-	tempFile, err := os.CreateTemp("", "kamui-static-*.zip")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tempPath := tempFile.Name()
-
-	// Create ZIP writer
-	zipWriter := zip.NewWriter(tempFile)
-
-	// Walk the directory and add files to ZIP
-	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip the root directory itself
-		if path == dirPath {
-			return nil
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(dirPath, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip hidden files and directories
-		if strings.HasPrefix(filepath.Base(path), ".") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Create ZIP header
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		if info.IsDir() {
-			header.Name += "/"
-		} else {
-			header.Method = zip.Deflate
-		}
-
-		// Create writer for this file
-		writer, err := zipWriter.CreateHeader(header)
-		if err != nil {
-			return err
-		}
-
-		// If it's a directory, we're done
-		if info.IsDir() {
-			return nil
-		}
-
-		// Copy file contents
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		_, err = io.Copy(writer, file)
-		return err
-	})
-
-	if err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
-		return "", fmt.Errorf("failed to create ZIP: %w", err)
-	}
-
-	// Close ZIP writer and temp file
-	if err := zipWriter.Close(); err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
-		return "", fmt.Errorf("failed to finalize ZIP: %w", err)
-	}
-	tempFile.Close()
-
-	return tempPath, nil
 }
 
 // AppsDeleteCommand represents the apps delete command

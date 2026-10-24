@@ -20,23 +20,24 @@ type Branch struct {
 
 // CreateAppInput represents the input for creating an app
 type CreateAppInput struct {
-	ProjectID        string
-	AppName          string
-	DisplayName      string
-	Language         string
-	DeployType       string
-	Owner            string
-	OwnerType        string
-	Repository       string
-	Branch           string
-	Directory        string
-	StartCommand     string
-	SetupCommand     string
-	PreCommand       string
-	Replicas         int
-	EnvVars          map[string]string
-	HealthCheckPath  string
-	DatabaseID       string
+	ProjectID       string
+	AppName         string
+	DisplayName     string
+	Language        string
+	DeployType      string
+	Owner           string
+	OwnerType       string
+	Repository      string
+	Branch          string
+	Directory       string
+	StartCommand    string
+	SetupCommand    string
+	PreCommand      string
+	Replicas        int
+	AppSpecType     string
+	EnvVars         map[string]string
+	HealthCheckPath string
+	DatabaseID      string
 }
 
 // CreateAppOutput represents the result of creating an app
@@ -72,15 +73,6 @@ type CreateStaticAppInput struct {
 	Directory        string
 }
 
-// CreateStaticAppUploadInput represents the input for creating a static app via file upload
-type CreateStaticAppUploadInput struct {
-	ProjectID   string
-	AppName     string
-	Replicas    int
-	AppSpecType string // nano, small, medium, large
-	FilePath    string // local path to the ZIP file
-}
-
 // UpdateStaticAppInput represents the input for updating a static app via GitHub
 type UpdateStaticAppInput struct {
 	AppID            string
@@ -93,15 +85,6 @@ type UpdateStaticAppInput struct {
 	RepositoryName   string
 	RepositoryBranch string
 	Directory        string
-}
-
-// UpdateStaticAppUploadInput represents the input for updating a static app via file upload
-type UpdateStaticAppUploadInput struct {
-	AppID       string
-	ProjectID   string
-	Replicas    int
-	AppSpecType string
-	FilePath    string
 }
 
 // AppService defines the interface for app operations
@@ -118,9 +101,6 @@ type AppService interface {
 	// CreateStaticApp creates a new static app via GitHub repository
 	CreateStaticApp(ctx context.Context, input *CreateStaticAppInput) (*CreateAppOutput, error)
 
-	// CreateStaticAppUpload creates a new static app via file upload
-	CreateStaticAppUpload(ctx context.Context, input *CreateStaticAppUploadInput) (*CreateAppOutput, error)
-
 	// ListApps returns all apps for a project
 	ListApps(ctx context.Context, projectID string) ([]App, error)
 
@@ -130,4 +110,3 @@ type AppService interface {
 	// DeleteApp deletes an app by ID
 	DeleteApp(ctx context.Context, appID string) error
 }
-

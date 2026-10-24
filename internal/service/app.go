@@ -119,6 +119,7 @@ func (s *appService) CreateApp(ctx context.Context, input *iface.CreateAppInput)
 		RepositoryBranch:    input.Branch,
 		Directory:           input.Directory,
 		DatabaseID:          input.DatabaseID,
+		AppSpecType:         input.AppSpecType,
 		Status: &api.ProjectStatus{
 			StatusRunning: 0,
 			StatusStopped: 0,
@@ -136,6 +137,9 @@ func (s *appService) CreateApp(ctx context.Context, input *iface.CreateAppInput)
 	}
 	if req.HealthCheckEndpoint == "" {
 		req.HealthCheckEndpoint = "/health"
+	}
+	if req.AppSpecType == "" {
+		req.AppSpecType = "nano"
 	}
 
 	resp, err := client.CreateApp(ctx, req)
@@ -246,39 +250,3 @@ func (s *appService) CreateStaticApp(ctx context.Context, input *iface.CreateSta
 		Name: input.AppName,
 	}, nil
 }
-
-// CreateStaticAppUpload creates a new static app via file upload
-func (s *appService) CreateStaticAppUpload(ctx context.Context, input *iface.CreateStaticAppUploadInput) (*iface.CreateAppOutput, error) {
-	client, err := s.getAPIClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build the request
-	req := &api.CreateStaticAppUploadRequest{
-		ProjectID:   input.ProjectID,
-		AppName:     input.AppName,
-		Replicas:    input.Replicas,
-		AppSpecType: input.AppSpecType,
-		FilePath:    input.FilePath,
-	}
-
-	// Set defaults
-	if req.Replicas == 0 {
-		req.Replicas = 1
-	}
-	if req.AppSpecType == "" {
-		req.AppSpecType = "nano"
-	}
-
-	resp, err := client.CreateStaticAppUpload(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create static app: %w", err)
-	}
-
-	return &iface.CreateAppOutput{
-		ID:   resp.AppID,
-		Name: input.AppName,
-	}, nil
-}
-
