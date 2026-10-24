@@ -17,6 +17,7 @@ import (
 	"github.com/kamui-project/kamui-cli/internal/config"
 	"github.com/kamui-project/kamui-cli/internal/daemon"
 	"github.com/kamui-project/kamui-cli/internal/dbaccess"
+	"github.com/kamui-project/kamui-cli/internal/localtls"
 	"github.com/kamui-project/kamui-cli/internal/portcalc"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
 )
@@ -81,6 +82,10 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 		return fmt.Errorf("failed to get external connection info: %w", err)
 	}
 
+	identity, err := localtls.LoadOrCreate(ctx)
+	if err != nil {
+		return err
+	}
 	// Reuse only a listener running this transport, never a legacy shared tunnel.
 	var port int
 	if entry := findDaemonEntryForDB(db.ID); entry != nil && daemon.IsAlive(entry.CloudflaredPID) {
@@ -98,7 +103,7 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 		tunnelCtx, cancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
 		go func() {
-			done <- dbaccess.Serve(tunnelCtx, listener, provider, func(err error) { fmt.Fprintln(os.Stderr, err) })
+			done <- dbaccess.Serve(tunnelCtx, listener, provider, identity.ServerConfig, func(err error) { fmt.Fprintln(os.Stderr, err) })
 		}()
 		defer func() { cancel(); listener.Close(); <-done }()
 	}
@@ -123,7 +128,7 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 	psqlCmd.Stdin = os.Stdin
 	psqlCmd.Stdout = os.Stdout
 	psqlCmd.Stderr = os.Stderr
-	psqlCmd.Env = append(os.Environ(), "PGPASSWORD="+conn.Password, "PGSSLMODE=disable", "PGGSSENCMODE=disable")
+	psqlCmd.Env = append(os.Environ(), "PGPASSWORD="+conn.Password, "PGSSLMODE=verify-full", "PGSSLROOTCERT="+identity.CertificateFile, "PGGSSENCMODE=disable")
 
 	fmt.Fprintf(os.Stderr, "Opening %s/%s as %s. Type \\q to exit.\n", project.Name, db.Name, conn.User)
 	return psqlCmd.Run()
@@ -176,6 +181,11 @@ func (s *databaseService) DaemonStart(ctx context.Context) error {
 	for time.Now().Before(deadline) {
 		if st, _ := daemon.ReadState(); st != nil && st.DaemonPID == pid && st.Transport == daemon.Transport && len(st.Entries) == len(tunnels) {
 			fmt.Fprintf(os.Stderr, "✓ kamui db daemon started (pid %d). Run `kamui db daemon status` to see ports.\n", pid)
+			identity, err := localtls.LoadOrCreate(ctx)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "GUI TLS: use verify-full with CA file %s\n", identity.CertificateFile)
 			return nil
 		}
 		if !daemon.IsAlive(pid) {

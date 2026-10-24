@@ -18,7 +18,7 @@ import (
 
 // Paths used by the daemon (under ~/.kamui).
 const (
-	Transport = "permit-tls-v1"
+	Transport = "permit-local-tls-v2"
 	pidFile   = "db-daemon.pid"
 	stateFile = "db-daemon.state.json"
 	logFile   = "db-daemon.log"

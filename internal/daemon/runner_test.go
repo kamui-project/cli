@@ -13,7 +13,11 @@ import (
 )
 
 func TestRunBindsLoopbackAndCleansUp(t *testing.T) {
-	t.Setenv("KAMUI_CONFIG_DIR", t.TempDir())
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KAMUI_CONFIG_DIR", dir)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +66,11 @@ func TestRunBindsLoopbackAndCleansUp(t *testing.T) {
 	}
 }
 func TestRunRejectsPortCollision(t *testing.T) {
-	t.Setenv("KAMUI_CONFIG_DIR", t.TempDir())
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KAMUI_CONFIG_DIR", dir)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

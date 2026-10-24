@@ -59,7 +59,10 @@ func (p *Permit) validate() (*url.URL, *tls.Config, error) {
 
 // Serve keeps the caller's loopback listener until cancellation. Each DB
 // session gets its own authenticated stream and renews without reconnecting SQL.
-func Serve(ctx context.Context, listener net.Listener, provider Provider, report func(error)) error {
+func Serve(ctx context.Context, listener net.Listener, provider Provider, localTLS *tls.Config, report func(error)) error {
+	if localTLS == nil || len(localTLS.Certificates) == 0 {
+		return errors.New("verified local database TLS is required")
+	}
 	host, _, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil || !net.ParseIP(host).IsLoopback() {
 		return errors.New("database listener must use a loopback address")
@@ -83,43 +86,55 @@ func Serve(ctx context.Context, listener net.Listener, provider Provider, report
 		go func() {
 			defer sessions.Done()
 			defer local.Close()
-			if err := forward(ctx, local, provider); err != nil && ctx.Err() == nil && report != nil {
+			if err := forwardWithDialer(ctx, local, provider, &websocket.Dialer{HandshakeTimeout: 10 * time.Second, Proxy: http.ProxyFromEnvironment}, localTLS); err != nil && ctx.Err() == nil && report != nil {
 				report(err)
 			}
 		}()
 	}
 }
 
-func forward(ctx context.Context, local net.Conn, provider Provider) error {
-	dialer := &websocket.Dialer{HandshakeTimeout: 10 * time.Second, Proxy: http.ProxyFromEnvironment}
-	return forwardWithDialer(ctx, local, provider, dialer)
-}
-
-func forwardWithDialer(ctx context.Context, local net.Conn, provider Provider, dialer *websocket.Dialer) error {
+func forwardWithDialer(ctx context.Context, local net.Conn, provider Provider, dialer *websocket.Dialer, localTLS *tls.Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stopLocal := context.AfterFunc(ctx, func() { local.Close() })
+	rawLocal := local
+	stopLocal := context.AfterFunc(ctx, func() { rawLocal.Close() })
 	defer stopLocal()
-	// Local libpq defaults to requesting SSL/GSS encryption. The CLI already
-	// provides verified upstream TLS; reject these local negotiations, then
-	// forward the startup packet. Clients requiring local SSL fail closed.
-	local.SetReadDeadline(time.Now().Add(10 * time.Second))
+	// Require PostgreSQL's SSLRequest and authenticate this loopback server
+	// before reading startup credentials. Plain clients fail before any API call.
+	local.SetDeadline(time.Now().Add(10 * time.Second))
 	header := make([]byte, 8)
+	encrypted := false
 	for attempt := 0; ; attempt++ {
 		if _, err := io.ReadFull(local, header); err != nil {
-			return nil // Listener readiness probes send no startup packet.
+			return nil
 		}
 		code := binary.BigEndian.Uint32(header[4:])
 		if binary.BigEndian.Uint32(header[:4]) != 8 || (code != 80877103 && code != 80877104) {
 			break
 		}
-		if attempt >= 2 {
+		if attempt >= 2 || encrypted {
 			return errors.New("too many local encryption requests")
 		}
-		if _, err := local.Write([]byte("N")); err != nil {
-			return err
+		if code == 80877103 && localTLS != nil {
+			if _, err := local.Write([]byte("S")); err != nil {
+				return err
+			}
+			secure := tls.Server(local, localTLS)
+			if err := secure.HandshakeContext(ctx); err != nil {
+				return errors.New("local database TLS handshake failed")
+			}
+			local = secure
+			encrypted = true
+		} else {
+			if _, err := local.Write([]byte("N")); err != nil {
+				return err
+			}
 		}
 	}
+	if localTLS != nil && !encrypted {
+		return errors.New("local database connection requires TLS; configure verify-full with db-local-ca.pem")
+	}
+	local.SetDeadline(time.Time{})
 	local.SetReadDeadline(time.Time{})
 	permit, err := provider(ctx)
 	if err != nil {

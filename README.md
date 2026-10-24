@@ -254,3 +254,22 @@ configure `api_url` in that directory's `config.json` before logging in.
 
 This branch's new transport is not yet connected to the real development cluster.
 Its TLS, permit renewal, daemon and local PostgreSQL integration have been tested.
+
+### Local database TLS
+
+Database listeners require TLS. `kamui db connect` configures psql with
+`sslmode=verify-full` and the local CA automatically. For GUI connections, use
+host `127.0.0.1`, the port shown by `kamui db daemon status`, and **verify-full**
+with the CA file printed by `kamui db daemon start` (normally
+`~/.kamui/db-local-ca.pem`). Enabling encryption without certificate verification
+does not authenticate the local listener.
+
+The config directory must be private (mode 0700); identity and CA files use
+0600. Never share `db-local-identity.pem`, which contains the private key.
+The local identity is separate from login tokens and the tenant's upstream CA.
+Existing plaintext daemons must be stopped and restarted after upgrading.
+A stale PID/port cannot authenticate with the pinned certificate; connection
+fails before DB credentials are transmitted. The two-year local certificate
+is not silently rotated: renew it deliberately and update GUI trust settings
+before it expires. Processes with access to the same OS account's private files
+remain outside this protection boundary.

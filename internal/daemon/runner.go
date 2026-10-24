@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kamui-project/kamui-cli/internal/dbaccess"
+	"github.com/kamui-project/kamui-cli/internal/localtls"
 )
 
 // Tunnel describes one loopback listener held by the daemon.
@@ -33,6 +34,10 @@ func Run(ctx context.Context, tunnels []Tunnel, provider func(string) dbaccess.P
 	defer cancel()
 	if len(tunnels) == 0 {
 		return errors.New("no database listeners configured")
+	}
+	identity, err := localtls.LoadOrCreate(ctx)
+	if err != nil {
+		return err
 	}
 	state := &State{DaemonPID: os.Getpid(), Transport: Transport}
 	listeners := make([]net.Listener, 0, len(tunnels))
@@ -74,7 +79,7 @@ func Run(ctx context.Context, tunnels []Tunnel, provider func(string) dbaccess.P
 		wg.Add(1)
 		go func(listener net.Listener, t Tunnel) {
 			defer wg.Done()
-			errs <- dbaccess.Serve(ctx, listener, provide, func(err error) {
+			errs <- dbaccess.Serve(ctx, listener, provide, identity.ServerConfig, func(err error) {
 				fmt.Fprintf(os.Stderr, "[daemon] %s/%s: %v\n", t.ProjectName, t.DatabaseName, err)
 			})
 		}(listener, t)

@@ -125,7 +125,7 @@ func startForward(t *testing.T, p Provider, d *websocket.Dialer) (net.Conn, <-ch
 	local, cli := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { defer cli.Close(); done <- forwardWithDialer(ctx, cli, p, d) }()
+	go func() { defer cli.Close(); done <- forwardWithDialer(ctx, cli, p, d, nil) }()
 	t.Cleanup(func() { cancel(); local.Close() })
 	local.SetDeadline(time.Now().Add(8 * time.Second))
 	return local, done

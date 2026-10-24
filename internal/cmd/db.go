@@ -103,8 +103,9 @@ func NewDbDaemonCommand(parent *DbCommand) *DbDaemonCommand {
 		Short: "Manage the persistent kamui db tunnel daemon",
 		Long: `The daemon maintains a local listener for each accessible database so GUI
 tools (TablePlus, DBeaver, pgAdmin) can connect to 127.0.0.1:<port>.
-Disable SSL in the GUI for this loopback connection; the CLI verifies TLS
-from your computer to the database and renews access permits automatically.`,
+Require SSL with server certificate verification in the GUI. Use the CA file
+printed by daemon start (db-local-ca.pem) with host 127.0.0.1. The CLI also
+verifies upstream TLS and renews access permits automatically.`,
 	}
 	d.startCmd = NewDbDaemonStartCommand(d)
 	d.statusCmd = NewDbDaemonStatusCommand(d)
