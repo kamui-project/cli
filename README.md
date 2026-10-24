@@ -273,3 +273,5 @@ fails before DB credentials are transmitted. The two-year local certificate
 is not silently rotated: renew it deliberately and update GUI trust settings
 before it expires. Processes with access to the same OS account's private files
 remain outside this protection boundary.
+
+On Windows, local TLS paths are checked using their owner and DACL instead of Unix mode bits. Only the current account, LocalSystem and Administrators may have access. Restrict an existing custom config directory ACL before using it if the CLI rejects it. PostgreSQL cancellation uses its fixed CancelRequest packet; ordinary plaintext startup packets remain rejected.

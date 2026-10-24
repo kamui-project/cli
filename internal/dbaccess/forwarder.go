@@ -131,7 +131,18 @@ func forwardWithDialer(ctx context.Context, local net.Conn, provider Provider, d
 			}
 		}
 	}
-	if localTLS != nil && !encrypted {
+	// libpq sends CancelRequest on a new plaintext connection, even when its
+	// main session uses verify-full. Accept only the fixed 16-byte cancellation
+	// packet here; never allow an unauthenticated startup/SQL stream through.
+	var cancellation []byte
+	if binary.BigEndian.Uint32(header[:4]) == 16 && binary.BigEndian.Uint32(header[4:]) == 80877102 {
+		cancellation = make([]byte, 16)
+		copy(cancellation, header)
+		if _, err := io.ReadFull(local, cancellation[8:]); err != nil {
+			return err
+		}
+	}
+	if localTLS != nil && !encrypted && cancellation == nil {
 		return errors.New("local database connection requires TLS; configure verify-full with db-local-ca.pem")
 	}
 	local.SetDeadline(time.Time{})
@@ -170,6 +181,16 @@ func forwardWithDialer(ctx context.Context, local net.Conn, provider Provider, d
 		return errors.New("database TLS verification failed")
 	}
 	stream.SetDeadline(time.Time{})
+	if cancellation != nil {
+		// CancelRequest has no response body. Wait for the server to close before
+		// closing the tunnel so that the encrypted cancellation is delivered.
+		stream.SetDeadline(time.Now().Add(10 * time.Second))
+		if _, err := upstream.Write(cancellation); err != nil {
+			return err
+		}
+		_, err := io.Copy(io.Discard, upstream)
+		return err
+	}
 	if _, err := upstream.Write(header); err != nil {
 		return err
 	}

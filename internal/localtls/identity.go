@@ -41,8 +41,11 @@ func LoadOrCreate(ctx context.Context) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("database config directory must be private (chmod 700) and must not be a symlink")
+	}
+	if err = privatePermissions(dir, info); err != nil {
+		return nil, err
 	}
 	lock := config.NewManagerWithPath(filepath.Join(dir, "db-local-tls"))
 	release, err := lock.LockAuth(ctx)
@@ -117,8 +120,11 @@ func readPrivateFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("local TLS file %s must be a regular file accessible only to its owner", path)
+	}
+	if err = privatePermissions(path, info); err != nil {
+		return nil, err
 	}
 	return os.ReadFile(path)
 }
