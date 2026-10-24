@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kamui-project/kamui-cli/internal/api"
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 	"github.com/kamui-project/kamui-cli/internal/config"
 	"github.com/kamui-project/kamui-cli/internal/daemon"
 	"github.com/kamui-project/kamui-cli/internal/dbaccess"
@@ -254,12 +255,18 @@ func (s *databaseService) collectTunnels(ctx context.Context) ([]daemon.Tunnel, 
 		// /api/projects (list) doesn't include databases; need /api/projects/{id}
 		full, err := s.projectService.GetProject(ctx, p.ID)
 		if err != nil {
+			if errors.Is(err, clientinfo.ErrUpdateRequired) {
+				return nil, err
+			}
 			fmt.Fprintf(os.Stderr, "warning: failed to read project %s: %v\n", p.Name, err)
 			continue
 		}
 		for _, db := range full.Databases {
 			permit, err := apiCli.GetDatabaseAccessPermit(ctx, db.ID)
 			if err != nil {
+				if errors.Is(err, clientinfo.ErrUpdateRequired) {
+					return nil, err
+				}
 				var apiErr *api.APIError
 				if errors.As(err, &apiErr) && (apiErr.StatusCode == 404 || apiErr.StatusCode == 409 || apiErr.StatusCode == 400) {
 					// External connection not initialized, or non-Pro plan — skip silently.

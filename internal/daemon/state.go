@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/kamui-project/kamui-cli/internal/config"
 )
@@ -175,24 +174,9 @@ func RemoveState() error {
 	return nil
 }
 
-// IsAlive returns true if the given PID names a running process. Uses
-// signal 0 (Unix) which checks existence without delivering a signal.
+// IsAlive returns true if the given PID names a running process.
 func IsAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, Signal(0) returns nil if process exists and we have permission
-	// to signal it; ESRCH if not. On Windows FindProcess always succeeds for
-	// any pid, so we additionally call Signal which Windows implements as a
-	// best-effort check.
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	return true
+	return pid > 0 && processAlive(pid)
 }
 
 // atomicWrite writes via tmp + rename so concurrent readers never see a

@@ -126,12 +126,13 @@ func LaunchDetached(tunnelsJSON string) (int, error) {
 		return 0, fmt.Errorf("cannot launch daemon: %w", err)
 	}
 	// Don't Wait — we want the child to outlive us.
-	return cmd.Process.Pid, nil
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	return pid, nil
 }
 
-// SignalAndWaitStop sends SIGTERM to the daemon and waits up to timeout for
-// it to disappear. Returns nil if the daemon exited cleanly, error
-// otherwise.
+// SignalAndWaitStop requests process termination and confirms exit.
+// Unix uses SIGTERM; Windows uses process termination because Go has no SIGTERM.
 func SignalAndWaitStop(pid int, timeout time.Duration) error {
 	if pid <= 0 || !IsAlive(pid) {
 		return nil
@@ -140,7 +141,8 @@ func SignalAndWaitStop(pid int, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	defer proc.Release()
+	if err := requestStop(proc); err != nil {
 		// Best-effort: if the process is already gone, that's fine.
 		if errors.Is(err, os.ErrProcessDone) || strings.Contains(err.Error(), "process already finished") {
 			return nil
@@ -154,10 +156,16 @@ func SignalAndWaitStop(pid int, timeout time.Duration) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	// Last resort: kill -9.
-	_ = proc.Kill()
-	if IsAlive(pid) {
-		return fmt.Errorf("daemon (pid %d) did not exit after SIGTERM + SIGKILL", pid)
+	// Last resort: force termination and allow the OS to finish process exit.
+	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && IsAlive(pid) {
+		return err
 	}
-	return nil
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !IsAlive(pid) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("daemon (pid %d) did not exit after termination", pid)
 }
