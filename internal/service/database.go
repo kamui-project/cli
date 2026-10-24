@@ -86,7 +86,7 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 	if err != nil {
 		return err
 	}
-	// Reuse only a listener running this transport, never a legacy shared tunnel.
+	// Reuse the daemon listener for this database when it is available.
 	var port int
 	if entry := findDaemonEntryForDB(db.ID); entry != nil && daemon.IsAlive(entry.CloudflaredPID) {
 		port = entry.LocalPort

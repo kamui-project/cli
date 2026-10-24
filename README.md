@@ -267,7 +267,6 @@ does not authenticate the local listener.
 The config directory must be private (mode 0700); identity and CA files use
 0600. Never share `db-local-identity.pem`, which contains the private key.
 The local identity is separate from login tokens and the tenant's upstream CA.
-Existing plaintext daemons must be stopped and restarted after upgrading.
 A stale PID/port cannot authenticate with the pinned certificate; connection
 fails before DB credentials are transmitted. The two-year local certificate
 is not silently rotated: renew it deliberately and update GUI trust settings
