@@ -17,6 +17,7 @@ type Container struct {
 	appService      iface.AppService
 	tokensService   iface.TokensService
 	databaseService iface.DatabaseService
+	storageService  iface.StorageService
 }
 
 // NewContainer creates a new dependency container with default implementations
@@ -35,6 +36,7 @@ func NewContainer() (*Container, error) {
 		appService:      service.NewAppService(configManager, authService),
 		tokensService:   service.NewTokensService(configManager, authService),
 		databaseService: service.NewDatabaseService(configManager, authService, projectService),
+		storageService:  service.NewStorageService(configManager, authService, projectService),
 	}, nil
 }
 
@@ -93,3 +95,9 @@ func (c *Container) DatabaseService() iface.DatabaseService {
 func (c *Container) ConfigManager() *config.Manager {
 	return c.configManager
 }
+
+// StorageService returns storage management and file transfer operations.
+func (c *Container) StorageService() iface.StorageService { return c.storageService }
+
+// SetStorageService supports independently verified service implementations.
+func (c *Container) SetStorageService(s iface.StorageService) { c.storageService = s }

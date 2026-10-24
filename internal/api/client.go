@@ -88,7 +88,10 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 	// Check for error status codes
 	if resp.StatusCode >= 400 {
 		var errResp ErrorResponse
-		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Message != "" {
+		if err := json.Unmarshal(respBody, &errResp); err == nil && (errResp.Message != "" || decodeStorageError(respBody) != "") {
+			if errResp.Message == "" {
+				errResp.Message = decodeStorageError(respBody)
+			}
 			return &APIError{
 				StatusCode: resp.StatusCode,
 				Message:    errResp.Message,

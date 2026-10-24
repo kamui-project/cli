@@ -28,6 +28,7 @@ type RootCommand struct {
 	tokensCmd   *TokensCommand
 	mcpCmd      *McpCommand
 	dbCmd       *DbCommand
+	storageCmd  *StorageCommand
 }
 
 // NewRootCommand creates a new root command
@@ -62,6 +63,7 @@ To get started, run:
 	r.tokensCmd = NewTokensCommand(r)
 	r.mcpCmd = NewMcpCommand(r)
 	r.dbCmd = NewDbCommand(r)
+	r.storageCmd = NewStorageCommand(r)
 
 	// Add subcommands
 	r.cmd.AddCommand(r.loginCmd.Command())
@@ -71,6 +73,7 @@ To get started, run:
 	r.cmd.AddCommand(r.tokensCmd.Command())
 	r.cmd.AddCommand(r.mcpCmd.Command())
 	r.cmd.AddCommand(r.dbCmd.Command())
+	r.cmd.AddCommand(r.storageCmd.Command())
 
 	return r
 }
