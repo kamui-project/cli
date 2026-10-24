@@ -24,6 +24,11 @@ func NewAuthService(configManager *config.Manager) iface.AuthService {
 
 // Login performs OAuth authentication and saves credentials
 func (s *authService) Login(ctx context.Context) error {
+	release, err := s.configManager.LockAuth(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	// Reject only if the current access token is still valid.
 	// Expired sessions are allowed to re-login directly without `kamui logout`.
 	if s.configManager.IsLoggedIn() {
@@ -66,6 +71,11 @@ func (s *authService) Login(ctx context.Context) error {
 // Server-side revoke is best-effort: if the network or server is unavailable,
 // local credentials are still cleared (logout MUST work offline).
 func (s *authService) Logout(ctx context.Context) error {
+	release, err := s.configManager.LockAuth(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	cfg, err := s.configManager.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -116,6 +126,11 @@ func (s *authService) IsLoggedIn() bool {
 
 // EnsureAuthenticated checks login status and refreshes token if needed
 func (s *authService) EnsureAuthenticated(ctx context.Context) error {
+	release, err := s.configManager.LockAuth(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	cfg, err := s.configManager.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/kamui-project/kamui-cli/internal/api"
-	"github.com/kamui-project/kamui-cli/internal/cloudflared"
 	"github.com/kamui-project/kamui-cli/internal/config"
 	"github.com/kamui-project/kamui-cli/internal/daemon"
+	"github.com/kamui-project/kamui-cli/internal/dbaccess"
 	"github.com/kamui-project/kamui-cli/internal/portcalc"
 	iface "github.com/kamui-project/kamui-cli/internal/service/interface"
 )
@@ -26,7 +26,6 @@ type databaseService struct {
 	configManager  *config.Manager
 	authService    iface.AuthService
 	projectService iface.ProjectService
-	cf             cloudflared.Manager
 }
 
 // NewDatabaseService wires the dependencies.
@@ -35,7 +34,6 @@ func NewDatabaseService(configManager *config.Manager, authService iface.AuthSer
 		configManager:  configManager,
 		authService:    authService,
 		projectService: projectService,
-		cf:             cloudflared.New(),
 	}
 }
 
@@ -83,65 +81,33 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 		return fmt.Errorf("failed to get external connection info: %w", err)
 	}
 
-	// 3. Pick the local port. If the daemon already tunnels this DB, reuse
-	//    its listener (no extra cloudflared, no port collision). Otherwise
-	//    grab an ephemeral free port — the deterministic port is reserved
-	//    for the daemon (so the dashboard's displayed port stays accurate).
+	// Reuse only a listener running this transport, never a legacy shared tunnel.
 	var port int
-	reuseDaemon := false
 	if entry := findDaemonEntryForDB(db.ID); entry != nil && daemon.IsAlive(entry.CloudflaredPID) {
 		port = entry.LocalPort
-		reuseDaemon = true
 	} else {
-		p, err := pickFreePort()
-		if err != nil {
-			return fmt.Errorf("failed to pick a free local port: %w", err)
+		provider := NewDatabasePermitProvider(s.configManager, s.authService, db.ID)
+		if _, err := provider(ctx); err != nil {
+			return fmt.Errorf("database access unavailable: %w", err)
 		}
-		port = p
-	}
-
-	// Forward Ctrl+C to psql via signal: psql handles SIGINT gracefully.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	if !reuseDaemon {
-		// 4. Fetch the platform-shared service token.
-		tok, err := client.GetCliServiceToken(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get CF service token: %w", err)
-		}
-
-		// 5. Spawn cloudflared in background (foreground mode for `connect`:
-		//    we hold it for the duration of the psql session).
-		listenURL := fmt.Sprintf("localhost:%d", port)
-		cfCmd, err := s.cf.BuildSpawnCmd(ctx, tok.Hostname, listenURL, tok.ClientID, tok.ClientSecret)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return err
 		}
-		cfCmd.Stdout = os.Stderr // surface cloudflared logs but not psql's stdout
-		cfCmd.Stderr = os.Stderr
-		if err := cfCmd.Start(); err != nil {
-			return fmt.Errorf("failed to start cloudflared: %w", err)
-		}
-		defer func() {
-			if cfCmd.Process != nil {
-				_ = cfCmd.Process.Signal(syscall.SIGTERM)
-				done := make(chan struct{})
-				go func() { _, _ = cfCmd.Process.Wait(); close(done) }()
-				select {
-				case <-done:
-				case <-time.After(3 * time.Second):
-					_ = cfCmd.Process.Kill()
-				}
-			}
+		port = listener.Addr().(*net.TCPAddr).Port
+		tunnelCtx, cancel := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() {
+			done <- dbaccess.Serve(tunnelCtx, listener, provider, func(err error) { fmt.Fprintln(os.Stderr, err) })
 		}()
-
-		// 6. Wait for cloudflared listener to become ready, then exec psql.
-		if err := waitForListener(ctx, port, 10*time.Second); err != nil {
-			return fmt.Errorf("cloudflared did not start listening on %s: %w", listenURL, err)
-		}
+		defer func() { cancel(); listener.Close(); <-done }()
 	}
+	// psql receives terminal SIGINT itself. SIGTERM cancels the connection.
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	defer stop()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	defer signal.Stop(sigCh)
 
 	psql, err := exec.LookPath("psql")
 	if err != nil {
@@ -149,7 +115,7 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 			"(macOS: `brew install libpq && brew link --force libpq`, Linux: `apt install postgresql-client`)")
 	}
 	psqlCmd := exec.CommandContext(ctx, psql,
-		"-h", "localhost",
+		"-h", "127.0.0.1",
 		"-p", fmt.Sprintf("%d", port),
 		"-U", conn.User,
 		"-d", conn.Database,
@@ -157,18 +123,23 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 	psqlCmd.Stdin = os.Stdin
 	psqlCmd.Stdout = os.Stdout
 	psqlCmd.Stderr = os.Stderr
-	psqlCmd.Env = append(os.Environ(), "PGPASSWORD="+conn.Password)
+	psqlCmd.Env = append(os.Environ(), "PGPASSWORD="+conn.Password, "PGSSLMODE=disable", "PGGSSENCMODE=disable")
 
-	fmt.Fprintf(os.Stderr, "✓ Connected to %s/%s as %s. Type \\q to exit.\n", project.Name, db.Name, conn.User)
-	if err := psqlCmd.Run(); err != nil {
-		// psql returns non-zero on \q'd-after-error too; fall through gracefully.
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return nil
+	fmt.Fprintf(os.Stderr, "Opening %s/%s as %s. Type \\q to exit.\n", project.Name, db.Name, conn.User)
+	return psqlCmd.Run()
+}
+
+// NewDatabasePermitProvider rechecks authorization on each connection and renewal.
+// It never stores permits or database passwords in daemon state.
+func NewDatabasePermitProvider(manager *config.Manager, auth iface.AuthService, databaseID string) dbaccess.Provider {
+	return func(ctx context.Context) (*dbaccess.Permit, error) {
+		s := &databaseService{configManager: manager, authService: auth}
+		client, err := s.getAPIClient(ctx)
+		if err != nil {
+			return nil, err
 		}
-		return err
+		return client.GetDatabaseAccessPermit(ctx, databaseID)
 	}
-	return nil
 }
 
 // DaemonStart implements `kamui db daemon start`.
@@ -191,44 +162,29 @@ func (s *databaseService) DaemonStart(ctx context.Context) error {
 			"press \"Regenerate password\" in the dashboard to initialize one, then try again")
 	}
 
-	// 3. Resolve service token (passed to daemon via env).
-	apiCli, err := s.getAPIClient(ctx)
-	if err != nil {
-		return err
-	}
-	tok, err := apiCli.GetCliServiceToken(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get CF service token: %w", err)
-	}
-
-	// 4. Ensure cloudflared binary is in place (so the daemon doesn't have
-	//    to download it on first start).
-	if _, err := s.cf.EnsureInstalled(ctx); err != nil {
-		return err
-	}
-
-	// 5. Re-exec ourselves with KAMUI_DB_DAEMON=1.
+	// Re-exec the CLI; the daemon obtains permits with the existing login.
 	tunnelsJSON, err := json.Marshal(tunnels)
 	if err != nil {
 		return err
 	}
-	pid, err := daemon.LaunchDetached(string(tunnelsJSON), tok.ClientID, tok.ClientSecret)
+	pid, err := daemon.LaunchDetached(string(tunnelsJSON))
 	if err != nil {
 		return err
 	}
-	if err := daemon.WritePID(pid); err != nil {
-		return err
-	}
-	// Give the daemon a brief moment to write its state file.
-	deadline := time.Now().Add(3 * time.Second)
+	// The child writes PID and state only after every listener is bound.
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if st, _ := daemon.ReadState(); st != nil && len(st.Entries) > 0 {
+		if st, _ := daemon.ReadState(); st != nil && st.DaemonPID == pid && st.Transport == daemon.Transport && len(st.Entries) == len(tunnels) {
+			fmt.Fprintf(os.Stderr, "✓ kamui db daemon started (pid %d). Run `kamui db daemon status` to see ports.\n", pid)
+			return nil
+		}
+		if !daemon.IsAlive(pid) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	fmt.Fprintf(os.Stderr, "✓ kamui db daemon started (pid %d). Run `kamui db daemon status` to see ports.\n", pid)
-	return nil
+	_ = daemon.SignalAndWaitStop(pid, time.Second)
+	return fmt.Errorf("database daemon did not start; check db-daemon.log in the configuration directory")
 }
 
 // DaemonStatus implements `kamui db daemon status`.
@@ -272,10 +228,8 @@ func (s *databaseService) DaemonStop(_ context.Context) error {
 	return nil
 }
 
-// collectTunnels enumerates every database the user has access to (across
-// all of their projects) for which an encrypted external password is set
-// up. Databases without initialized external connection are silently skipped
-// (dashboard returns 404/409 depending on server version).
+// collectTunnels uses the permit API to find authorized databases without
+// fetching their passwords. Unavailable or unauthorized databases are skipped.
 func (s *databaseService) collectTunnels(ctx context.Context) ([]daemon.Tunnel, error) {
 	projects, err := s.projectService.ListProjects(ctx)
 	if err != nil {
@@ -294,7 +248,7 @@ func (s *databaseService) collectTunnels(ctx context.Context) ([]daemon.Tunnel, 
 			continue
 		}
 		for _, db := range full.Databases {
-			conn, err := apiCli.GetDatabaseExternalConnection(ctx, db.ID)
+			permit, err := apiCli.GetDatabaseAccessPermit(ctx, db.ID)
 			if err != nil {
 				var apiErr *api.APIError
 				if errors.As(err, &apiErr) && (apiErr.StatusCode == 404 || apiErr.StatusCode == 409 || apiErr.StatusCode == 400) {
@@ -313,7 +267,7 @@ func (s *databaseService) collectTunnels(ctx context.Context) ([]daemon.Tunnel, 
 				DatabaseName: db.Name,
 				DatabaseID:   db.ID,
 				LocalPort:    portcalc.Port(db.ID),
-				RemoteHost:   conn.RemoteHost,
+				RemoteHost:   permit.Endpoint,
 			})
 		}
 	}
@@ -363,7 +317,7 @@ func parseProjectDB(s string) (project, db string, err error) {
 // if the daemon is not running or doesn't tunnel it.
 func findDaemonEntryForDB(dbID string) *daemon.Entry {
 	st, err := daemon.ReadState()
-	if err != nil || st == nil {
+	if err != nil || st == nil || st.Transport != daemon.Transport || !daemon.IsAlive(st.DaemonPID) {
 		return nil
 	}
 	for i := range st.Entries {
@@ -372,33 +326,4 @@ func findDaemonEntryForDB(dbID string) *daemon.Entry {
 		}
 	}
 	return nil
-}
-
-// pickFreePort asks the kernel for an unused TCP port on localhost. Brief
-// race window between Close and the next bind, but acceptable for a CLI.
-func pickFreePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-// waitForListener polls TCP-connect to localhost:port until success or timeout.
-func waitForListener(ctx context.Context, port int, timeout time.Duration) error {
-	addr := fmt.Sprintf("localhost:%d", port)
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout after %s", timeout)
 }

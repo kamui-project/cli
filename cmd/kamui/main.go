@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kamui-project/kamui-cli/internal/cloudflared"
 	"github.com/kamui-project/kamui-cli/internal/cmd"
 	"github.com/kamui-project/kamui-cli/internal/daemon"
+	"github.com/kamui-project/kamui-cli/internal/dbaccess"
+	"github.com/kamui-project/kamui-cli/internal/di"
+	"github.com/kamui-project/kamui-cli/internal/service"
 )
 
 func main() {
@@ -30,8 +32,6 @@ func main() {
 // It reads tunnel config from env vars and runs the long-lived loop.
 func runDaemon() int {
 	tunnelsJSON := os.Getenv("KAMUI_DB_DAEMON_TUNNELS")
-	clientID := os.Getenv("KAMUI_DB_DAEMON_CF_CLIENT_ID")
-	clientSecret := os.Getenv("KAMUI_DB_DAEMON_CF_CLIENT_SECRET")
 
 	var tunnels []daemon.Tunnel
 	if err := json.Unmarshal([]byte(tunnelsJSON), &tunnels); err != nil {
@@ -39,8 +39,15 @@ func runDaemon() int {
 		return 2
 	}
 
-	mgr := cloudflared.New()
-	if err := daemon.Run(context.Background(), tunnels, clientID, clientSecret, mgr.BuildSpawnCmd); err != nil {
+	container, err := di.NewContainer()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	provider := func(id string) dbaccess.Provider {
+		return service.NewDatabasePermitProvider(container.ConfigManager(), container.AuthService(), id)
+	}
+	if err := daemon.Run(context.Background(), tunnels, provider); err != nil {
 		fmt.Fprintf(os.Stderr, "[daemon] exit error: %v\n", err)
 		return 1
 	}

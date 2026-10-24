@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/kamui-project/kamui-cli/internal/dbaccess"
 )
 
-// Tunnel describes one cloudflared listener the daemon should keep alive.
+// Tunnel describes one loopback listener held by the daemon.
 type Tunnel struct {
 	ProjectName  string
 	DatabaseName string
@@ -22,102 +25,75 @@ type Tunnel struct {
 	RemoteHost   string
 }
 
-// CloudflaredFactory is a thin abstraction over cloudflared.Manager so the
-// daemon doesn't import the cloudflared package directly (avoids cycles
-// when DatabaseService re-uses this runner).
-type CloudflaredFactory func(ctx context.Context, hostname, listenURL, clientID, clientSecret string) (*exec.Cmd, error)
-
-// Run is the daemon process body. It is invoked when the kamui binary is
-// re-exec'd with KAMUI_DB_DAEMON=1; the parent process does NOT call Run
-// directly. Behavior:
-//
-//  1. Open the log file (stdout/stderr were already redirected to it by the
-//     parent before exec).
-//  2. Spawn one cloudflared per tunnel, recording PIDs in state.json.
-//  3. Wait for SIGTERM/SIGINT; on signal, kill all children and exit.
-//  4. If any child cloudflared exits unexpectedly, log it but stay running
-//     (TablePlus will reconnect when cloudflared is restarted via
-//     `kamui db daemon stop && kamui db daemon start`).
-//
-// Return values are written to stderr of the daemon (i.e. the log file) and
-// then `os.Exit` is called.
-func Run(ctx context.Context, tunnels []Tunnel, clientID, clientSecret string, factory CloudflaredFactory) error {
-	state := &State{
-		DaemonPID: os.Getpid(),
-		Entries:   make([]Entry, 0, len(tunnels)),
+// Run hosts listeners in this process; no shared service token or child proxy.
+func Run(ctx context.Context, tunnels []Tunnel, provider func(string) dbaccess.Provider) error {
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if len(tunnels) == 0 {
+		return errors.New("no database listeners configured")
 	}
-	cmds := make([]*exec.Cmd, 0, len(tunnels))
-
+	state := &State{DaemonPID: os.Getpid(), Transport: Transport}
+	listeners := make([]net.Listener, 0, len(tunnels))
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		for _, listener := range listeners {
+			listener.Close()
+		}
+		wg.Wait()
+	}()
+	// Bind all ports before advertising readiness. Port collisions fail visibly.
 	for _, t := range tunnels {
-		listenURL := fmt.Sprintf("localhost:%d", t.LocalPort)
-		cmd, err := factory(ctx, t.RemoteHost, listenURL, clientID, clientSecret)
+		if t.LocalPort < 1 || t.LocalPort > 65535 {
+			return errors.New("invalid database port")
+		}
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", t.LocalPort))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[daemon] FAILED to build cloudflared for %s/%s: %v\n", t.ProjectName, t.DatabaseName, err)
-			continue
+			return fmt.Errorf("cannot listen for %s/%s: %w", t.ProjectName, t.DatabaseName, err)
 		}
-		// Children inherit our stdout/stderr (the log file).
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			fmt.Fprintf(os.Stderr, "[daemon] FAILED to start cloudflared for %s/%s: %v\n", t.ProjectName, t.DatabaseName, err)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "[daemon] started cloudflared pid=%d for %s/%s on localhost:%d (remote=%s)\n",
-			cmd.Process.Pid, t.ProjectName, t.DatabaseName, t.LocalPort, t.RemoteHost)
-		cmds = append(cmds, cmd)
+		listeners = append(listeners, listener)
 		state.Entries = append(state.Entries, Entry{
-			ProjectName:    t.ProjectName,
-			DatabaseName:   t.DatabaseName,
-			DatabaseID:     t.DatabaseID,
-			LocalPort:      t.LocalPort,
-			RemoteHost:     t.RemoteHost,
-			CloudflaredPID: cmd.Process.Pid,
+			ProjectName: t.ProjectName, DatabaseName: t.DatabaseName, DatabaseID: t.DatabaseID,
+			LocalPort: t.LocalPort, RemoteHost: t.RemoteHost, CloudflaredPID: os.Getpid(),
 		})
 	}
-
+	if err := WritePID(os.Getpid()); err != nil {
+		return err
+	}
+	defer RemovePID()
 	if err := WriteState(state); err != nil {
-		return fmt.Errorf("failed to write state: %w", err)
+		return err
 	}
-
-	// Block until signaled.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
-	fmt.Fprintln(os.Stderr, "[daemon] shutdown signal received; killing children...")
-
-	for _, c := range cmds {
-		_ = c.Process.Signal(syscall.SIGTERM)
+	defer RemoveState()
+	errs := make(chan error, len(listeners))
+	for i, listener := range listeners {
+		t := tunnels[i]
+		provide := provider(t.DatabaseID)
+		wg.Add(1)
+		go func(listener net.Listener, t Tunnel) {
+			defer wg.Done()
+			errs <- dbaccess.Serve(ctx, listener, provide, func(err error) {
+				fmt.Fprintf(os.Stderr, "[daemon] %s/%s: %v\n", t.ProjectName, t.DatabaseName, err)
+			})
+		}(listener, t)
 	}
-	// Give children a moment to exit gracefully, then kill -9 stragglers.
-	deadline := time.Now().Add(5 * time.Second)
-	for _, c := range cmds {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			_ = c.Process.Kill()
-			continue
-		}
-		done := make(chan error, 1)
-		go func(cmd *exec.Cmd) { done <- cmd.Wait() }(c)
-		select {
-		case <-done:
-		case <-time.After(remaining):
-			_ = c.Process.Kill()
-		}
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errs:
+		return err
 	}
-
-	_ = RemoveState()
-	_ = RemovePID()
-	return nil
 }
 
 // LaunchDetached starts the kamui binary again (this same executable) with
 // KAMUI_DB_DAEMON=1 set, redirecting its stdio to ~/.kamui/db-daemon.log.
 // Returns the daemon PID.
 //
-// tunnelsJSON, clientID, clientSecret are passed to the child via env vars
-// so they don't leak into ps (and so the parent can keep its arg vector
-// clean for cobra).
-func LaunchDetached(tunnelsJSON, clientID, clientSecret string) (int, error) {
+// Only listener metadata is passed to the child via environment variables.
+// Permits are obtained by the child and remain in memory.
+func LaunchDetached(tunnelsJSON string) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("cannot determine kamui binary path: %w", err)
@@ -139,8 +115,6 @@ func LaunchDetached(tunnelsJSON, clientID, clientSecret string) (int, error) {
 	cmd.Env = append(os.Environ(),
 		"KAMUI_DB_DAEMON=1",
 		"KAMUI_DB_DAEMON_TUNNELS="+tunnelsJSON,
-		"KAMUI_DB_DAEMON_CF_CLIENT_ID="+clientID,
-		"KAMUI_DB_DAEMON_CF_CLIENT_SECRET="+clientSecret,
 	)
 	cmd.SysProcAttr = detachSysProcAttr()
 	if err := cmd.Start(); err != nil {
@@ -182,7 +156,3 @@ func SignalAndWaitStop(pid int, timeout time.Duration) error {
 	}
 	return nil
 }
-
-// DiscardLog returns an io.Writer that swallows everything (used as a
-// safety fallback if log-file open fails inside Run).
-func DiscardLog() io.Writer { return io.Discard }

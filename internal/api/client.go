@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/kamui-project/kamui-cli/internal/dbaccess"
 )
 
 const (
@@ -153,10 +155,10 @@ func (e *APIError) IsNotFound() bool {
 
 // Installation represents a GitHub App installation with repositories
 type Installation struct {
-	ID        int64  `json:"id"`
+	ID         int64  `json:"id"`
 	Repository string `json:"repository"`
-	Owner     string `json:"owner"`
-	OwnerType string `json:"owner_type"`
+	Owner      string `json:"owner"`
+	OwnerType  string `json:"owner_type"`
 }
 
 // InstallationsResponse represents the response from /api/installations
@@ -532,4 +534,16 @@ func (c *Client) RegenerateDatabasePassword(ctx context.Context, databaseID stri
 		return nil, err
 	}
 	return &conn, nil
+}
+
+// GetDatabaseAccessPermit obtains a short-lived, DB-scoped transport permit.
+func (c *Client) GetDatabaseAccessPermit(ctx context.Context, databaseID string) (*dbaccess.Permit, error) {
+	var permit dbaccess.Permit
+	if err := c.Post(ctx, fmt.Sprintf("/api/database/%s/access-permit", databaseID), nil, &permit); err != nil {
+		return nil, err
+	}
+	if err := permit.Validate(); err != nil {
+		return nil, err
+	}
+	return &permit, nil
 }

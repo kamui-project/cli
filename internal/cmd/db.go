@@ -58,8 +58,8 @@ func NewDbConnectCommand(parent *DbCommand) *DbConnectCommand {
 	c.cmd = &cobra.Command{
 		Use:   "connect <project>/<db>",
 		Short: "Open a psql session to a specific database",
-		Long: `Spawn cloudflared in the background, then exec psql against the local
-forwarder. cloudflared is killed automatically when psql exits.
+		Long: `Open a local database tunnel, then run psql. The CLI verifies the database
+TLS certificate and renews access permits while the SQL session is open.
 
 Project names containing spaces are handled automatically — both forms work:
   kamui db connect "kamui platform/kamui"
@@ -101,9 +101,10 @@ func NewDbDaemonCommand(parent *DbCommand) *DbDaemonCommand {
 	d.cmd = &cobra.Command{
 		Use:   "daemon",
 		Short: "Manage the persistent kamui db tunnel daemon",
-		Long: `The daemon spawns one cloudflared TCP forwarder per database you have
-access to so that GUI tools (TablePlus, DBeaver, pgAdmin) can connect to
-localhost:<port> without invoking the CLI per-session.`,
+		Long: `The daemon maintains a local listener for each accessible database so GUI
+tools (TablePlus, DBeaver, pgAdmin) can connect to 127.0.0.1:<port>.
+Disable SSL in the GUI for this loopback connection; the CLI verifies TLS
+from your computer to the database and renews access permits automatically.`,
 	}
 	d.startCmd = NewDbDaemonStartCommand(d)
 	d.statusCmd = NewDbDaemonStatusCommand(d)
@@ -191,7 +192,7 @@ func (c *DbDaemonStatusCommand) Run(cmd *cobra.Command, args []string) error {
 			alive,
 		})
 	}
-	printTable(os.Stdout, "", []string{"PROJECT", "DATABASE", "LOCAL_PORT", "CF_PID", "ALIVE"}, rows)
+	printTable(os.Stdout, "", []string{"PROJECT", "DATABASE", "LOCAL_PORT", "PID", "ALIVE"}, rows)
 	return nil
 }
 

@@ -219,3 +219,38 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Kamui Platform](https://kamui-platform.com)
 - [Documentation](https://docs.kamui-platform.com)
 - [GitHub Issues](https://github.com/kamui-project/cli/issues)
+
+
+## Database connections
+
+On the database feature branch, the existing commands use short-lived access
+permits and a verified TLS connection to the database proxy:
+
+```sh
+kamui db connect myproject/mydb
+kamui db daemon start
+kamui db daemon status
+kamui db daemon stop
+```
+
+`connect` runs psql. The daemon keeps the usual per-database local ports for
+TablePlus, DBeaver, pgAdmin and other clients. Connect to `127.0.0.1` and disable
+SSL **for the local GUI connection**: the CLI itself requires and verifies TLS
+from your computer to the database proxy before forwarding database credentials.
+The authenticated API supplies the expected proxy name and public CA certificate.
+No certificate files or cloudflared installation are needed from the user.
+
+Permits renew while a SQL connection is open, without recreating that connection.
+If renewal is rejected or unavailable, the connection closes at its current permit
+expiry. Failed SQL/transactions are not automatically replayed. The API and proxy
+must support this protocol; the CLI does not fall back to the shared access token.
+Stop and start any daemon left running by an older CLI build before using this version.
+The legacy JSON field `cloudflared_pid` now identifies the listener's daemon process.
+
+To keep development credentials and daemon state separate, set `KAMUI_CONFIG_DIR`
+to an absolute directory before login and before every CLI/daemon command. The
+default remains `~/.kamui`. Use separate directories for different API environments;
+configure `api_url` in that directory's `config.json` before logging in.
+
+This branch's new transport is not yet connected to the real development cluster.
+Its TLS, permit renewal, daemon and local PostgreSQL integration have been tested.

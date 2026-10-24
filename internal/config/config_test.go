@@ -1,10 +1,12 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestValidateAPIURL(t *testing.T) {
@@ -89,5 +91,42 @@ func TestGetAPIURL_ValidStoredPassesThrough(t *testing.T) {
 	}
 	if got != "https://staging.kamui-platform.com" {
 		t.Errorf("GetAPIURL = %q, want pass-through", got)
+	}
+}
+
+func TestEnvironmentDirectoryAndAuthLock(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KAMUI_CONFIG_DIR", dir)
+	a, err := NewManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ConfigPath() != filepath.Join(dir, ConfigFileName) {
+		t.Fatal("did not isolate configuration")
+	}
+	release, err := a.LockAuth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if second, err := b.LockAuth(ctx); err == nil {
+		second()
+		release()
+		t.Fatal("concurrent refresh was allowed")
+	}
+	release()
+	second, err := b.LockAuth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second()
+	t.Setenv("KAMUI_CONFIG_DIR", "relative-path")
+	if _, err := NewManager(); err == nil {
+		t.Fatal("relative config directory accepted")
 	}
 }

@@ -12,19 +12,20 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/kamui-project/kamui-cli/internal/config"
 )
 
 // Paths used by the daemon (under ~/.kamui).
 const (
-	dirName     = ".kamui"
-	pidFile     = "db-daemon.pid"
-	stateFile   = "db-daemon.state.json"
-	logFile     = "db-daemon.log"
+	Transport = "permit-tls-v1"
+	pidFile   = "db-daemon.pid"
+	stateFile = "db-daemon.state.json"
+	logFile   = "db-daemon.log"
 )
 
-// Entry describes one tunnel the daemon manages: a single
-// `cloudflared access tcp` child process forwarding localhost:Port to a
-// specific Aurora database via Cloudflare Tunnel + Access.
+// Entry describes a loopback listener owned by the daemon.
+// CloudflaredPID retains its JSON name for compatibility; new entries use the daemon PID.
 type Entry struct {
 	ProjectName    string `json:"project_name"`
 	DatabaseName   string `json:"database_name"`
@@ -38,16 +39,16 @@ type Entry struct {
 // `kamui db daemon status`, written by the daemon process itself.
 type State struct {
 	DaemonPID int     `json:"daemon_pid"`
+	Transport string  `json:"transport,omitempty"`
 	Entries   []Entry `json:"entries"`
 }
 
 // HomeDir returns ~/.kamui (creating it if missing).
 func HomeDir() (string, error) {
-	home, err := os.UserHomeDir()
+	d, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
-	d := filepath.Join(home, dirName)
 	if err := os.MkdirAll(d, 0o700); err != nil {
 		return "", err
 	}

@@ -53,13 +53,26 @@ type Manager struct {
 
 // NewManager creates a new configuration manager
 func NewManager() (*Manager, error) {
-	homeDir, err := os.UserHomeDir()
+	dir, err := Dir()
 	if err != nil {
 		return nil, err
 	}
+	return &Manager{configPath: filepath.Join(dir, ConfigFileName)}, nil
+}
 
-	configPath := filepath.Join(homeDir, ConfigDirName, ConfigFileName)
-	return &Manager{configPath: configPath}, nil
+// Dir separates credentials and daemon state when testing another environment.
+func Dir() (string, error) {
+	if dir := os.Getenv("KAMUI_CONFIG_DIR"); dir != "" {
+		if !filepath.IsAbs(dir) {
+			return "", errors.New("KAMUI_CONFIG_DIR must be an absolute path")
+		}
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ConfigDirName), nil
 }
 
 // NewManagerWithPath creates a new configuration manager with a custom path
@@ -108,8 +121,20 @@ func (m *Manager) Save(config *Config) error {
 		return err
 	}
 
-	// Write with restricted permissions (owner read/write only)
-	return os.WriteFile(m.configPath, data, 0600)
+	// Publish atomically so another CLI process never reads half a token refresh.
+	f, err := os.CreateTemp(configDir, ".config-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), m.configPath)
 }
 
 // Clear removes all authentication data from the config
