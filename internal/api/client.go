@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 	"github.com/kamui-project/kamui-cli/internal/dbaccess"
 )
 
@@ -66,6 +67,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(req)
 
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
@@ -76,6 +78,9 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return err
+	}
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
@@ -383,6 +388,7 @@ func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticApp
 	// Set headers
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 	httpReq.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(httpReq)
 	if c.token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -393,6 +399,9 @@ func (c *Client) CreateStaticAppUpload(ctx context.Context, req *CreateStaticApp
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer httpResp.Body.Close()
+	if err := clientinfo.ObserveResponse(httpResp); err != nil {
+		return nil, err
+	}
 
 	// Read response body
 	respBody, err := io.ReadAll(httpResp.Body)

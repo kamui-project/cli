@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 )
 
 // mcpToolsList sends a JSON-RPC `tools/list` call to a Streamable HTTP MCP
@@ -25,6 +27,8 @@ func mcpToolsList(ctx context.Context, mcpURL, token string) (int, error) {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Kamui-Client-Type", "cli")
+	clientinfo.SetVersionHeader(req)
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -36,6 +40,9 @@ func mcpToolsList(ctx context.Context, mcpURL, token string) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return 0, err
+	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

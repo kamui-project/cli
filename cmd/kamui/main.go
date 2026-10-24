@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 	"github.com/kamui-project/kamui-cli/internal/cmd"
 	"github.com/kamui-project/kamui-cli/internal/daemon"
 	"github.com/kamui-project/kamui-cli/internal/dbaccess"
@@ -17,6 +18,7 @@ import (
 )
 
 func main() {
+	clientinfo.Version = cmd.Version
 	// Daemon re-exec path: when `kamui db daemon start` re-launches us with
 	// KAMUI_DB_DAEMON=1, hand control to the daemon Runner instead of cobra.
 	if os.Getenv("KAMUI_DB_DAEMON") == "1" {

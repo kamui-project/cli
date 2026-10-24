@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 	"github.com/pkg/browser"
 )
 
@@ -110,6 +111,7 @@ func (o *OAuthFlow) RegisterClient(ctx context.Context, redirectURI string) (*Cl
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(req)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -117,6 +119,9 @@ func (o *OAuthFlow) RegisterClient(ctx context.Context, redirectURI string) (*Cl
 		return nil, fmt.Errorf("registration request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("client registration failed with status %d", resp.StatusCode)
@@ -228,6 +233,7 @@ func (o *OAuthFlow) RefreshTokens(ctx context.Context, refreshToken string) (*OA
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(req)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -235,6 +241,9 @@ func (o *OAuthFlow) RefreshTokens(ctx context.Context, refreshToken string) (*OA
 		return nil, fmt.Errorf("token refresh request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
@@ -282,6 +291,7 @@ func (o *OAuthFlow) Revoke(ctx context.Context, token, tokenTypeHint string) err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(req)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -289,6 +299,9 @@ func (o *OAuthFlow) Revoke(ctx context.Context, token, tokenTypeHint string) err
 		return fmt.Errorf("revoke request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return err
+	}
 
 	// RFC 7009: 200 = success (even if token didn't exist).
 	// 401 = client auth failed. 400 = malformed request.
@@ -389,6 +402,7 @@ func (o *OAuthFlow) exchangeCodeForTokens(ctx context.Context, code, redirectURI
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set(kamuiClientTypeHeader, kamuiClientTypeCLI)
+	clientinfo.SetVersionHeader(req)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -396,6 +410,9 @@ func (o *OAuthFlow) exchangeCodeForTokens(ctx context.Context, code, redirectURI
 		return nil, fmt.Errorf("token exchange request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if err := clientinfo.ObserveResponse(resp); err != nil {
+		return nil, err
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token exchange failed with status %d", resp.StatusCode)

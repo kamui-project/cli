@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kamui-project/kamui-cli/internal/clientinfo"
 )
 
 type Permit struct {
@@ -149,6 +150,9 @@ func forwardWithDialer(ctx context.Context, local net.Conn, provider Provider, d
 	local.SetReadDeadline(time.Time{})
 	permit, err := provider(ctx)
 	if err != nil {
+		if errors.Is(err, clientinfo.ErrUpdateRequired) {
+			return err
+		}
 		return errors.New("database access permit unavailable")
 	}
 	endpoint, tlsConfig, err := permit.validate()
