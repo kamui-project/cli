@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/mattn/go-isatty"
@@ -150,6 +152,9 @@ func NewStorageCommand(root *RootCommand) *StorageCommand {
 		return nil
 	}}
 	rm.Flags().BoolVarP(&fileYes, "yes", "y", false, "Confirm file deletion without prompting")
+	for _, command := range []*cobra.Command{list, create, remove, ls, upload, download, rm} {
+		command.RunE = storageRunWithSignals(command.RunE)
+	}
 	files.AddCommand(ls, upload, download, rm)
 	s.cmd.AddCommand(list, create, remove, files)
 	return s
@@ -179,4 +184,13 @@ func confirmStorageDelete(yes bool, message string) error {
 		return fmt.Errorf("deletion cancelled")
 	}
 	return nil
+}
+
+func storageRunWithSignals(run func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		cmd.SetContext(ctx)
+		return run(cmd, args)
+	}
 }

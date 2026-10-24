@@ -47,3 +47,8 @@ type Upload struct {
 	Status        string `json:"status"`
 	Generation    string `json:"generation,omitempty"`
 }
+
+type ProjectReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}

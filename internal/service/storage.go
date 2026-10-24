@@ -16,13 +16,12 @@ import (
 )
 
 type storageService struct {
-	config   *config.Manager
-	auth     iface.AuthService
-	projects iface.ProjectService
+	config *config.Manager
+	auth   iface.AuthService
 }
 
-func NewStorageService(config *config.Manager, auth iface.AuthService, projects iface.ProjectService) iface.StorageService {
-	return &storageService{config: config, auth: auth, projects: projects}
+func NewStorageService(config *config.Manager, auth iface.AuthService) iface.StorageService {
+	return &storageService{config: config, auth: auth}
 }
 func (s *storageService) api(ctx context.Context) (*api.Client, error) {
 	if err := s.auth.EnsureAuthenticated(ctx); err != nil {
@@ -45,7 +44,11 @@ func (s *storageService) project(ctx context.Context, reference string) (string,
 	if storage.ValidID(reference) {
 		return reference, nil
 	}
-	projects, err := s.projects.ListProjects(ctx)
+	client, err := s.api(ctx)
+	if err != nil {
+		return "", err
+	}
+	projects, err := client.StorageProjects(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -88,38 +91,40 @@ func (s *storageService) Create(ctx context.Context, project, name string) (*sto
 	}
 	return client.CreateStorage(ctx, id, name)
 }
-func (s *storageService) resolve(ctx context.Context, project, reference string) (string, string, error) {
+func (s *storageService) resolve(ctx context.Context, project, reference string) (string, *storage.Item, error) {
 	if reference == "" {
-		return "", "", errors.New("storage name or ID is required")
+		return "", nil, errors.New("storage name or ID is required")
 	}
 	projectID, err := s.project(ctx, project)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	client, err := s.api(ctx)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	overview, err := client.ListStorages(ctx, projectID)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
-	id := ""
+	var selected *storage.Item
 	for _, item := range overview.Items {
 		if item.ID == reference || item.Name == reference {
-			if id != "" {
-				return "", "", errors.New("storage name is ambiguous; use its ID")
+			if selected != nil {
+				return "", nil, errors.New("storage name is ambiguous; use its ID")
 			}
-			id = item.ID
+			copy := item
+			selected = &copy
 		}
 	}
-	if !storage.ValidID(id) {
-		return "", "", fmt.Errorf("storage %q not found in this project", reference)
+	if selected == nil || !storage.ValidID(selected.ID) {
+		return "", nil, fmt.Errorf("storage %q not found in this project", reference)
 	}
-	return projectID, id, nil
+	return projectID, selected, nil
 }
+
 func (s *storageService) Delete(ctx context.Context, project, reference string) error {
-	projectID, id, err := s.resolve(ctx, project, reference)
+	projectID, item, err := s.resolve(ctx, project, reference)
 	if err != nil {
 		return err
 	}
@@ -127,19 +132,22 @@ func (s *storageService) Delete(ctx context.Context, project, reference string) 
 	if err != nil {
 		return err
 	}
-	return client.DeleteStorage(ctx, projectID, id)
+	if item.ObjectCount != 0 || item.CommittedBytes != 0 || item.ReservedBytes != 0 {
+		return errors.New("storage is not empty; delete its files and finish or cancel uploads first")
+	}
+	return client.DeleteStorage(ctx, projectID, item.ID, item.Name)
 }
 func (s *storageService) data(ctx context.Context, project, reference, role string) (*storage.Client, error) {
-	projectID, id, err := s.resolve(ctx, project, reference)
+	projectID, item, err := s.resolve(ctx, project, reference)
 	if err != nil {
 		return nil, err
 	}
-	return storage.NewClient(id, role, func(ctx context.Context) (*storage.Permit, error) {
+	return storage.NewClient(item.ID, role, func(ctx context.Context) (*storage.Permit, error) {
 		client, err := s.api(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return client.GetStoragePermit(ctx, projectID, id, role)
+		return client.GetStoragePermit(ctx, projectID, item.ID, role)
 	}), nil
 }
 func (s *storageService) ListFiles(ctx context.Context, project, reference, prefix, cursor string, limit int) (*storage.ObjectPage, error) {

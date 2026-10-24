@@ -31,8 +31,8 @@ func (c *Client) CreateStorage(ctx context.Context, project, name string) (*stor
 	err := c.storageRequest(ctx, http.MethodPost, storagePath(project), map[string]string{"name": name}, &result)
 	return &result, err
 }
-func (c *Client) DeleteStorage(ctx context.Context, project, id string) error {
-	return c.storageRequest(ctx, http.MethodDelete, storagePath(project)+"/"+url.PathEscape(id), nil, nil)
+func (c *Client) DeleteStorage(ctx context.Context, project, id, name string) error {
+	return c.storageRequest(ctx, http.MethodDelete, storagePath(project)+"/"+url.PathEscape(id), map[string]interface{}{"confirmation_name": name, "empty_only": true}, nil)
 }
 func (c *Client) GetStoragePermit(ctx context.Context, project, id, role string) (*storage.Permit, error) {
 	var result storage.Permit
@@ -51,4 +51,10 @@ func decodeStorageError(data []byte) string {
 		return result.Error.Message
 	}
 	return ""
+}
+
+func (c *Client) StorageProjects(ctx context.Context) ([]storage.ProjectReference, error) {
+	var result []storage.ProjectReference
+	err := c.storageRequest(ctx, http.MethodGet, "/api/projects", nil, &result)
+	return result, err
 }

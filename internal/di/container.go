@@ -36,7 +36,7 @@ func NewContainer() (*Container, error) {
 		appService:      service.NewAppService(configManager, authService),
 		tokensService:   service.NewTokensService(configManager, authService),
 		databaseService: service.NewDatabaseService(configManager, authService, projectService),
-		storageService:  service.NewStorageService(configManager, authService, projectService),
+		storageService:  service.NewStorageService(configManager, authService),
 	}, nil
 }
 
