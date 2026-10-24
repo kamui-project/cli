@@ -123,7 +123,7 @@ func (s *databaseService) Connect(ctx context.Context, projectAndDB string) erro
 		"-h", "127.0.0.1",
 		"-p", fmt.Sprintf("%d", port),
 		"-U", conn.User,
-		"-d", conn.Database,
+		"-d", "dbname="+quoteLibpqParameter(conn.Database)+" hostaddr=127.0.0.1 sslmode=verify-full sslrootcert="+quoteLibpqParameter(identity.CertificateFile)+" gssencmode=disable",
 	)
 	psqlCmd.Stdin = os.Stdin
 	psqlCmd.Stdout = os.Stdout
@@ -336,4 +336,10 @@ func findDaemonEntryForDB(dbID string) *daemon.Entry {
 		}
 	}
 	return nil
+}
+
+// libpq service entries override environment defaults, so pin TLS options in
+// the connection string. Escape keyword values independently of shell syntax.
+func quoteLibpqParameter(value string) string {
+	return "'" + strings.NewReplacer("\\", "\\\\", "'", "\\'").Replace(value) + "'"
 }
