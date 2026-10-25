@@ -479,6 +479,11 @@ func (d *ProjectsDeleteCommand) Command() *cobra.Command {
 
 // Run executes the projects delete command
 func (d *ProjectsDeleteCommand) Run(cmd *cobra.Command, args []string) error {
+	skipConfirm, _ := cmd.Flags().GetBool("yes")
+	if !skipConfirm && !isStdinTTY() {
+		return fmt.Errorf("project deletion requires --yes when stdin is not a terminal")
+	}
+
 	nameOrID := args[0]
 	ctx := cmd.Context()
 
@@ -503,9 +508,6 @@ func (d *ProjectsDeleteCommand) Run(cmd *cobra.Command, args []string) error {
 	if project == nil {
 		return fmt.Errorf("project not found: %s\n\nUse 'kamui projects list' to see available projects", nameOrID)
 	}
-
-	// Check for --yes flag
-	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 	if !skipConfirm {
 		// Show warning
