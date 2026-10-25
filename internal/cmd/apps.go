@@ -992,6 +992,11 @@ type appMatch struct {
 
 // Run executes the apps delete command
 func (d *AppsDeleteCommand) Run(cmd *cobra.Command, args []string) error {
+	skipConfirm, _ := cmd.Flags().GetBool("yes")
+	if !skipConfirm && !isStdinTTY() {
+		return fmt.Errorf("application deletion requires --yes when stdin is not a terminal")
+	}
+
 	nameOrID := args[0]
 	ctx := cmd.Context()
 
@@ -1115,9 +1120,6 @@ func (d *AppsDeleteCommand) Run(cmd *cobra.Command, args []string) error {
 	if appName == "" {
 		appName = foundAppID
 	}
-
-	// Check for --yes flag
-	skipConfirm, _ := cmd.Flags().GetBool("yes")
 
 	if !skipConfirm {
 		// Show warning
