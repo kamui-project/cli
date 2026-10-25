@@ -37,6 +37,12 @@ type DaemonEntry struct {
 // group. Implementation lives in internal/service/database.go and depends on
 // AuthService and ProjectService.
 type DatabaseService interface {
+	// List and Get expose metadata only; no external credentials are fetched.
+	List(ctx context.Context, project string) ([]DatabaseInfo, error)
+	Get(ctx context.Context, project, reference string) (*DatabaseInfo, error)
+	Create(ctx context.Context, input CreateDatabaseInput) (*CreateDatabaseOutput, error)
+	Delete(ctx context.Context, project, reference string) error
+
 	// Connect opens a verified database tunnel and runs psql until it exits.
 	Connect(ctx context.Context, projectAndDB string) error
 
@@ -50,4 +56,30 @@ type DatabaseService interface {
 
 	// DaemonStop closes the listeners and removes daemon state.
 	DaemonStop(ctx context.Context) error
+}
+
+// DatabaseInfo contains only metadata visible within the selected project.
+type DatabaseInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"db_name"`
+	Status      string `json:"database_status"`
+	SpecType    string `json:"db_spec_type"`
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name"`
+}
+
+type CreateDatabaseInput struct {
+	Project     string
+	Name        string
+	SpecType    string
+	RoutingMode string
+}
+
+type CreateDatabaseOutput struct {
+	DatabaseID  string `json:"database_id"`
+	ProjectID   string `json:"project_id"`
+	Name        string `json:"db_name"`
+	SpecType    string `json:"db_spec_type"`
+	RoutingMode string `json:"db_routing_mode"`
+	Status      string `json:"status"`
 }

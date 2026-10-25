@@ -101,3 +101,6 @@ func (c *Container) StorageService() iface.StorageService { return c.storageServ
 
 // SetStorageService supports independently verified service implementations.
 func (c *Container) SetStorageService(s iface.StorageService) { c.storageService = s }
+
+// SetDatabaseService injects database operations for independent command tests.
+func (c *Container) SetDatabaseService(s iface.DatabaseService) { c.databaseService = s }

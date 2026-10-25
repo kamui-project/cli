@@ -24,20 +24,22 @@ func NewDbCommand(root *RootCommand) *DbCommand {
 	d := &DbCommand{root: root}
 	d.cmd = &cobra.Command{
 		Use:   "db",
-		Short: "Connect to your Kamui-managed PostgreSQL databases from your laptop",
-		Long: `Connect to Kamui Pro/Aurora databases via Cloudflare Tunnel + Access.
+		Short: "Manage databases and connect to Kamui-managed PostgreSQL",
+		Long: `Manage databases with create/list/get/delete using --project (name or ID).
+Connect to Kamui Pro/Aurora databases via Cloudflare Tunnel + Access.
 
 Two modes are supported:
   - kamui db connect <project>/<db>     One-shot psql session
   - kamui db daemon  start|status|stop  Persistent listener for TablePlus / pgAdmin
 
-Both rely on the dashboard-issued external password (regenerate it from the
+Connection modes rely on the dashboard-issued external password (regenerate it from the
 database detail page if it has never been set).`,
 	}
 	d.connectCmd = NewDbConnectCommand(d)
 	d.daemonCmd = NewDbDaemonCommand(d)
 	d.cmd.AddCommand(d.connectCmd.Command())
 	d.cmd.AddCommand(d.daemonCmd.Command())
+	d.addManagementCommands()
 	return d
 }
 
